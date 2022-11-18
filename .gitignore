@@ -1,0 +1,14 @@
+*.tiff
+*.tif
+*.png
+*.pyc
+**/archive/
+**/__pycache__/
+__pycache__/
+**/.ipynb_checkpoints/
+onedcelltrack/models/cellpose*
+test_drafts
+*.pytest_cache
+**egg-info/
+build/
+drafts/

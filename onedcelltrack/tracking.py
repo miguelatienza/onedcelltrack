@@ -7,8 +7,7 @@ Created on Sun Dec 12 11:02:33 2021
 
 import numpy as np
 import sys
-sys.path.append('..')
-from celltracker import functions
+from . import functions
 import trackpy as tp
 # from scipy import stats
 # from numba import prange, njit

@@ -1,20 +1,19 @@
 # -*- coding: utf-8 -*-
 import sys
-sys.path.append('..')
-from celltracker import functions
+from . import functions
 import numpy as np
 import os
 import json
 from urllib import request
 from cellpose import models
-from cellpose.io import logger_setup 
+#from cellpose.io import logger_setup 
 from tqdm import tqdm
 #logger_setup()
 
 def segment(cytoplasm, nucleus, gpu=True, model_type='cyto', channels=[1,2], diameter=None, flow_threshold=0.4, mask_threshold=0, pretrained_model=None, nucleus_bottom_percentile=0.05, nucleus_top_percentile=99.95, cyto_bottom_percentile=0.1, cyto_top_percentile=99.9, check_preprocessing=False, verbose=True):   
     
     from cellpose import models
-    from cellpose.io import logger_setup 
+    #from cellpose.io import logger_setup 
     #logger_setup()
     
     if pretrained_model is None:

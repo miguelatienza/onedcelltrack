@@ -1,6 +1,6 @@
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
-import mpl_interactions.ipyplot as iplt
+#import mpl_interactions.ipyplot as iplt
 from nd2reader import ND2Reader
 import pandas as pd
 from IPython.display import display
@@ -8,9 +8,8 @@ import sqlite3
 import numpy as np
 from skimage.segmentation import find_boundaries
 import sys
-sys.path.append('/home/m/Miguel.Atienza/celltracker')
-from celltracker import functions
-from celltracker import tracking
+from .. import functions
+from .. import tracking
 from tqdm import tqdm
 from collections.abc import Iterable
 import trackpy as tp
@@ -21,7 +20,7 @@ from cellpose import models
 from cellpose.io import logger_setup 
 from skimage.morphology import binary_erosion
 from skimage.io import imread
-from celltracker.classify import cp
+from ..classify import cp
 import matplotlib.collections as collections
 
 class Viewer:
@@ -333,7 +332,7 @@ class TpViewer:
 
 class CellposeViewer:
     
-    def __init__(self, nd2file):
+    def __init__(self, nd2file, bf_channel=None, nuc_channel=None):
         
         self.link_dfs = {}
         
@@ -342,14 +341,20 @@ class CellposeViewer:
         
         channels = self.f.metadata['channels']
 
-        if 'erry' in channels[0] or 'exas' in channels[0]:
-            self.nucleus_channel=0
-            self.cyto_channel=1
-        elif 'erry' in channels[1] or 'exas' in channels[1]:
-            self.nucleus_channel=1
-            self.cyto_channel=0
+        if bf_channel is None or nuc_channel is None:
+                    ###Infer the channels
+            if 'erry' in channels[0] or 'exas' in channels[0]:
+                self.nucleus_channel=0
+                self.cyto_channel=1
+            elif 'erry' in channels[1] or 'exas' in channels[1]:
+                self.nucleus_channel=1
+                self.cyto_channel=0
+            else:
+                raise ValueError(f"""The channels could not be automatically detected! \n
+                The following channels are available: {channels} . Please specify the indices of bf_channel and nuc_channel as keyword arguments. i.e: bf_channel=0, nuc_channel=1""")
         else:
-            raise ValueError('The channels could not be automatically detected!')
+            self.cyto_channel=bf_channel
+            self.nucleus_channel=nuc_channel
 
         #Widgets
         
@@ -426,7 +431,7 @@ class CellposeViewer:
             self.model = models.Cellpose(gpu=gpu, model_type='cyto')
 
         else:
-            path_to_models = os.path.join(os.path.dirname(__file__), '../celltracker/models')
+            path_to_models = os.path.join(os.path.dirname(__file__), '../models')
             with open(os.path.join(path_to_models, 'models.json'), 'r') as f:
                 dic = json.load(f)
             if pretrained_model in dic.keys():
@@ -486,8 +491,7 @@ class CellposeViewer:
         image = np.stack((cyto, nucleus), axis=1)
         
         mask = self.model.eval(
-            image, diameter=diameter, channels=[1,2], flow_threshold=flow_threshold, mask_threshold=mask_threshold, normalize=normalize, verbose=verbose)[0].astype('uint8')
-        
+            image, diameter=diameter, channels=[1,2], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=normalize, progress=verbose)[0].astype('uint8')
         
         bin_mask = np.zeros(mask.shape, dtype='bool')
         cell_ids = np.unique(mask)

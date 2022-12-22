@@ -566,7 +566,7 @@ class ResultsViewer:
         self.track_memory = widgets.IntSlider(min=0,max=20, step=1, value=5, description="max_travel", continuous_update=False)
 
         self.view_nuclei = widgets.Checkbox(
-        value=False,
+        value=True,
         description='Nuclei',
         disabled=False,
         button_style='', # 'success', 'info', 'warning', 'danger' or ''
@@ -574,7 +574,7 @@ class ResultsViewer:
         icon='')
         
         self.view_cellpose = widgets.Checkbox(
-        value=False,
+        value=True,
         description='Contours',
         disabled=False,
         button_style='', # 'success', 'info', 'warning', 'danger' or ''
@@ -595,22 +595,46 @@ class ResultsViewer:
         self.update_lanes()
         
         ##Initialize the figure
-        plt.ioff()
-        self.fig, self.ax = plt.subplots()
-        self.fig.tight_layout()
+
+        fig1=widgets.Output()
+        plt.ion()
+        with plt.ioff():
+            with fig1:
+                #fig = plt.figure(tight_layout=True, dpi=200)
+                #gs = gridspec.GridSpec(2, 4)
+                #fig, axes = plt.subplots(nrows=2, ncols=2, dpi=100, constrained_layout=True)
+                self.fig, self.ax = plt.subplots(constrained_layout=True, figsize=(6,6))
+                
+                display(self.fig.canvas)
+
+        fig2=widgets.Output()
+     
+        with plt.ioff():
+            with fig2:
+                #fig = plt.figure(tight_layout=True, dpi=200)
+                #gs = gridspec.GridSpec(2, 4)
+                #fig, axes = plt.subplots(nrows=2, ncols=2, dpi=100, constrained_layout=True)
+                
+                self.fig2, self.ax2 = plt.subplots(constrained_layout=True, figsize=(8,6))
+                
+                #self.cid2 = self.fig2.canvas.mpl_connect('button_press_event', self.onclick_plot)
+                
+                display(self.fig2.canvas)
+
         #self.fig.canvas.toolbar_visible = False
         self.fig.canvas.header_visible = False
         self.fig.canvas.footer_visible = True
+        self.fig.canvas.toolbar_position='bottom'
+
+        self.fig2.canvas.header_visible = False
+        self.fig2.canvas.footer_visible = True
+        self.fig2.canvas.toolbar_position='bottom'
         self.im = self.ax.imshow(image, cmap='gray')
         
         self.cid = self.fig.canvas.mpl_connect('button_press_event', self.onclick)
 
         self.bscat = self.ax.scatter([0,0], [0,0], s=0.4*plt.rcParams['lines.markersize'] ** 2, color='blue', alpha=0.5)
         self.lscat = self.ax.scatter([0,0], [0,0], s=0.2*plt.rcParams['lines.markersize'] ** 2, color='red', alpha=0.5)
-        self.fig2, self.ax2 = plt.subplots()
-        self.fig2.tight_layout()
-        self.fig2.canvas.header_visible = False
-        self.fig2.canvas.footer_visible = True
         
         self.cid2 = self.fig2.canvas.mpl_connect('button_press_event', self.onclick_plot)
         
@@ -618,24 +642,23 @@ class ResultsViewer:
         self.tmarker=self.ax2.axvline(self.t.value, color='black', lw=1)
         
         #Organize layout and display
-        out = widgets.interactive_output(self.update, {'t': self.t, 'c': self.c, 'v': self.v, 'clip': self.clip, 'min_mass': self.min_mass, 'diameter': self.diameter, 'min_frames': self.min_frames, 'max_travel': self.max_travel})
+        #out = widgets.interactive_output(self.update, {'t': self.t, 'c': self.c, 'v': self.v, 'clip': self.clip, 'min_mass': self.min_mass, 'diameter': self.diameter, 'min_frames': self.min_frames, 'max_travel': self.max_travel})
         
-        box = widgets.VBox([self.t, self.c, self.v, self.clip, self.min_mass, self.diameter, self.min_frames, self.max_travel, self.view_nuclei, self.view_cellpose]) #, layout=widgets.Layout(width='400px'))
-        box1 = widgets.VBox([out, box])
-        grid = widgets.widgets.GridspecLayout(6, 6)
-        
-        grid[:3, :3] = self.fig.canvas
-        grid[1:3,4:] = box
-        grid[0, 5] = out
-        grid[3:, :3]= self.fig2.canvas
-        #display(self.fig.canvas)
-        display(grid)
-        plt.ion()
+        buttons = [self.t, self.c, self.v, self.clip]
+        for button in buttons:
+            button.observe(self.update, 'value')
+
+        self.buttons_box = widgets.VBox(buttons+ [self.view_nuclei, self.view_cellpose]) #, layout=widgets.Layout(width='400px'))
+        self.grid = widgets.HBox([self.buttons_box, fig1, fig2])
         
 
-    def update(self, t, c, v, clip, min_mass, diameter, min_frames, max_travel):
+    def update(self, change, t=None, c=None, v=None, clip=None):
 
-        #vmin, vmax = clip
+        vmin, vmax = self.clip.value
+        clip=self.clip.value
+        t = self.t.value
+        c =self.c.value
+        v=self.v.value
         #image = self.f.get_frame_2D(v=v,c=c,t=t)
                
         #self.im.set_data(image)
@@ -666,6 +689,8 @@ class ResultsViewer:
         
     def update_tracks(self):
         
+        #Update red and blue nuclei on image
+
         t, v= self.t.value, self.v.value
         scat=self.bscat
         df = self.df[self.df.frame==self.t.value]
@@ -678,7 +703,6 @@ class ResultsViewer:
         
         data = np.hstack((df.x.values[:,np.newaxis], df.y.values[:, np.newaxis]))
         scat.set_offsets(data)
-        
         
         return
     
@@ -714,7 +738,8 @@ class ResultsViewer:
 
             outlines = find_boundaries(bin_mask, mode='outer')
             try:
-                print(f'{cell_ids.max()} Masks detected')
+                pass
+                #print(f'{cell_ids.max()} Masks detected')
             except ValueError:
                 print('No masks detected')
 
@@ -776,16 +801,19 @@ class ResultsViewer:
             self.df = tracking.remove_close_cells(self.df)
             
             self.clean_df = tracking.get_clean_tracks(self.df)
-
+        
             conn.close()
         
         else:
+
             self.df = pd.read_csv(f'{self.outpath}/XY{fov}/tracking_data.csv')
+      
             self.df['particle_id']=self.df.particle  
             self.df = tracking.get_single_cells(self.df)
             self.df = tracking.remove_close_cells(self.df)
             
             self.clean_df = tracking.get_clean_tracks(self.df)
+            #self.df = self.clean_df
             #self.clean_df = pd.read_csv('/project/ag-moonraedler/MAtienza/UNikon_gradients_27_05_22/extraction/XY0/clean_tracking_data.csv')
 
     def load_masks(self, outpath, fov):

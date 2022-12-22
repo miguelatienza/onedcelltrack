@@ -299,7 +299,7 @@ def get_cyto_positions(lanes_mask, lanes_metric, binary_cyto_mask, lonely_nuclei
 def get_single_cells(df):
 
     #Take only valid cells
-    df.loc[:, 'single_nucleus'] = np.ones(len(df), dtype='bool')
+    df['single_nucleus'] = np.ones(len(df), dtype='bool')
     #df = df[df.valid==1]
     ids = df.particle.unique()
     #ids = np.arange(uniques.size)

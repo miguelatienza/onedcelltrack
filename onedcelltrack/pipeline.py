@@ -674,7 +674,7 @@ class Track:
 
 def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, manual=False, fovs=None, sql=False, lane_distance=30,
  lane_low_clip=0, lane_high_clip=2000, min_mass=2.65e5, max_travel=15, track_memory=15, diameter=15, min_frames=10, cyto_diameter=29, 
- flow_threshold=1.25, mask_threshold=0, pretrained_model='mdamb231', use_existing_parameters=False):
+ flow_threshold=1.25, mask_threshold=0, pretrained_model='mdamb231', use_existing_parameters=False, bf_channel=None, nuc_channel=None):
     
     args=locals()
     ##Save arguments to file
@@ -740,7 +740,7 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
                 os.mkdir(path_out_fov)
 
             #Initiate a Track object
-            track = Track(data_path=data_path, path_out=path_out_fov, nd2_file=nd2_file, lanes_file=lanes_file, frame_indices=frame_indices, fov=fov)
+            track = Track(data_path=data_path, path_out=path_out_fov, nd2_file=nd2_file, lanes_file=lanes_file, frame_indices=frame_indices, fov=fov, bf_channel=bf_channel, nuc_channel=nuc_channel)
 
             #Start by detecting the lanes
             if not os.path.isfile(path_out_fov+'lanes/lanes_mask.tif'):

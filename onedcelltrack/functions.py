@@ -523,7 +523,7 @@ def tifs_to_mp4(dir, crf=0):
 
 def mp4_to_np(file, frames=None, as_grey=True):
 
-    print(f'Reading {os.path.basename(file)} ...')
+    #print(f'Reading {os.path.basename(file)} ...')
     import skvideo.io
 
     if frames is not None:
@@ -540,7 +540,7 @@ def mp4_to_np(file, frames=None, as_grey=True):
         else:
             x = skvideo.io.vread(file, as_grey=False)[:,:,:,:]
           
-    print('Done Reading')
+    #print('Done Reading')
     return x
     
 def remove_peaks(x, max_step=5, max_peak_width=5):

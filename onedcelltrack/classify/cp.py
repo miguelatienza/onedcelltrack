@@ -9,8 +9,6 @@ def S(x, axis=0):
 
 def find_cp(x, N, coarsen=20):
     
-
-
     S_0 = S(x)
     
     d_S_0 = S_0.max() - S_0.min()
@@ -171,7 +169,7 @@ def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30
             v_mean = ((nucleus_current[-1]-nucleus_current[0])/pixelperum)/(dt)
             v_mean/=(pixelperum)
 
-            print(v_min, v_mean)
+            #print(v_min, v_mean)
 
             segment = dfp.frame.isin(t_current)
             if np.abs(v_mean)>=v_min:
@@ -249,4 +247,3 @@ def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30
 
     return dfp, cp_indices, valid_boundaries
 
-        

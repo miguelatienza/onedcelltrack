@@ -859,8 +859,8 @@ class ResultsViewer:
 
         self.dfp, cp_indices, segments = cp.classify_movement(self.dfp)
 
-        M_bool =self.dfp.motion=='M'
-        S_bool =self.dfp.motion=='S'
+        M_bool = self.dfp.motion=='M'
+        S_bool = self.dfp.motion=='S'
         #self.ax2.plot(self.dfp.frame, S_bool.values*150, color='green')
 
         x_collection = self.dfp.frame.values
@@ -870,7 +870,6 @@ class ResultsViewer:
 
         S_collection = collections.BrokenBarHCollection.span_where(
                     x_collection, ymin=self.dfp.rear.min(), ymax=self.dfp.front.max(), where=S_bool, facecolor='blue', alpha=0.2)
-
 
         self.ax2.add_collection(M_collection)
         self.ax2.add_collection(S_collection)  

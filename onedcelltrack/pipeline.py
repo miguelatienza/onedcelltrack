@@ -15,6 +15,7 @@ import os
 from . import functions
 from .segmentation import segment, segment_looped
 from . import tracking 
+from . import lane_detection
 import pandas as pd
 from skvideo import io
 import json
@@ -428,7 +429,7 @@ class Track:
 
         return
 
-    def segment_2(self, cyto_contrast=1, cyto_brightness=0, nucleus_contrast=1, nucleus_brightness=0, log_nucleus=True, cyto_bottom_percentile=0.05, cyto_top_percentile=99.95, nucleus_bottom_percentile=0.05, nucleus_top_percentile=99.95, pretrained_model=None, flow_threshold=0.8, mask_threshold=-2, gpu=True, model_type='cyto', cyto_diameter=29, verbose=False):
+    def segment_2(self, cyto_contrast=1, cyto_brightness=0, nucleus_contrast=1, nucleus_brightness=0, log_nucleus=True, cyto_bottom_percentile=0.05, cyto_top_percentile=99.95, nucleus_bottom_percentile=0.05, nucleus_top_percentile=99.95, pretrained_model=None, flow_threshold=0.8, mask_threshold=-2, gpu=True, model_type='cyto', cyto_diameter=29, verbose=False, savenumpy=True):
         self.metadata.update(locals())
         self.metadata.pop('self')
         with open(self.meta_path, "w") as outfile:
@@ -441,8 +442,10 @@ class Track:
         #nucleus = functions.preprocess(nucleus, bottom_percentile=nucleus_bottom_percentile, top_percentile=nucleus_top_percentile, log=log_nucleus, return_type='float32')
         
         cyto_masks = segment_looped(cytoplasm, nucleus, gpu=gpu, model_type=model_type, channels=[1,2], diameter=cyto_diameter, flow_threshold=flow_threshold, mask_threshold=mask_threshold, pretrained_model=pretrained_model, check_preprocessing=False)
-        
-        functions.np_to_mp4(cyto_masks, os.path.join(self.path_out, 'cyto_masks.mp4'))
+        if savenumpy:
+            np.savez(os.path.join(self.path_out, 'cyto_masks.npz'), cyto_masks)
+        else:
+            functions.np_to_mp4(cyto_masks, os.path.join(self.path_out, 'cyto_masks.mp4'))
 
         return
 
@@ -490,8 +493,8 @@ class Track:
 
         lanes_image = np.clip(lanes_image, low_clip, high_clip)
 
-        self.lanes_mask, self.lanes_metric = functions.get_lane_mask(
-            lanes_image, delta_y_max=20, kernel_width=5, line_distance=lane_distance
+        self.lanes_mask, self.lanes_metric = lane_detection.get_lane_mask(
+            lanes_image, kernel_width=5, line_distance=lane_distance
             )
         self.n_lanes = self.lanes_mask.max()
 
@@ -529,9 +532,9 @@ class Track:
             
             self.df.index.names = ['Index']
 
-            self.df = tracking.get_single_cells(self.df)
-            self.df = tracking.remove_close_cells(self.df)
-            self.clean_df = tracking.get_clean_tracks(self.df)
+            # self.df = tracking.get_single_cells(self.df)
+            # self.df = tracking.remove_close_cells(self.df)
+            # self.clean_df = tracking.get_clean_tracks(self.df)
 
         except AttributeError:
             path_to_patterns = os.path.join(self.data_path, self.lanes_file)
@@ -541,13 +544,13 @@ class Track:
             self.lanes_metric = imread(os.path.join(lanes_dir, 'lanes_metric.tif'))
             self.df = tracking.get_tracking_data(self.df, cyto_masks, self.lanes_mask, self.lanes_metric, patterns)
 
-            self.df = tracking.get_single_cells(self.df)
-            self.df = tracking.remove_close_cells(self.df)
+            # self.df = tracking.get_single_cells(self.df)
+            # self.df = tracking.remove_close_cells(self.df)
 
-            self.clean_df = tracking.get_clean_tracks(self.df)
+            # self.clean_df = tracking.get_clean_tracks(self.df)
 
         self.df.to_csv(self.df_path)
-        self.clean_df.to_csv(self.clean_df_path)
+        #self.clean_df.to_csv(self.clean_df_path)
         
         return
         
@@ -662,19 +665,19 @@ class Track:
         
         return
 
-    def get_clean_tracks(self, df=None):
+    def get_clean_tracks(self, tres, df=None):
 
         if df is None:
             df = self.df
-        
+        print('here')
         self.clean_df = tracking.get_clean_tracks(df)
-
-        clean_df_path = self.df_path.split('.')[0]+'clean.csv'
-        self.df.to_csv(clean_df_path)
+        self.clean_df = tracking.classify_tracks(self.clean_df, tres=tres)
+        #clean_df_path = self.df_path.split('.')[0]+'clean.csv'
+        self.clean_df.to_csv(self.clean_df_path)
 
 def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, manual=False, fovs=None, sql=False, lane_distance=30,
  lane_low_clip=0, lane_high_clip=2000, min_mass=2.65e5, max_travel=15, track_memory=15, diameter=15, min_frames=10, cyto_diameter=29, 
- flow_threshold=1.25, mask_threshold=0, pretrained_model='mdamb231', use_existing_parameters=False, bf_channel=None, nuc_channel=None):
+ flow_threshold=1.25, mask_threshold=0, pretrained_model='mdamb231', use_existing_parameters=False, bf_channel=None, nuc_channel=None, tres=120):
     
     args=locals()
     ##Save arguments to file
@@ -729,7 +732,7 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
 
     too_muchtravel=[]
     start_time = time.time()
-    for fov in tqdm(fovs):
+    for fov in fovs:
         try:
             print(f'Computing field of view {fov}')
 
@@ -776,6 +779,8 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
                     continue
             track.df = pd.read_csv(f'{path_out_fov}tracking_data.csv')
             track.get_locations()
+
+            track.get_clean_tracks(tres=tres)
             
             #Now enter the data from the stored data into the tracks table in the database
             if not sql:
@@ -796,9 +801,9 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
             track.get_movie(draw_contours=True)
         except Exception as e:
             print(f'Error at fov {fov}. See {log_filename} for more details')
-            #logger.error(traceback.format_exc())
+            print(str(e))
             with open(log_filename, 'a') as log_file:
-                log_file.write(str(e)+'\n')
+                log_file.write(str(traceback.format_exc())+'\n')
             continue
         
             

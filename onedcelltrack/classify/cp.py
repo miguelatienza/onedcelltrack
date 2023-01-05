@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 from skimage.segmentation import find_boundaries
+from .. import functions
+DEBUG=False
 
 def S(x, axis=0):
     
@@ -9,6 +11,7 @@ def S(x, axis=0):
 
 def find_cp(x, N, coarsen=20):
     
+
     S_0 = S(x)
     
     d_S_0 = S_0.max() - S_0.min()
@@ -96,7 +99,6 @@ def split(x, x_start, x_end, N, L_th, min_length=100, debug=False):
             [cp_index],
             split(x, x_start_left, x_end_left, N, L_th, min_length)
             ))
-        
     
     elif right_split:
         
@@ -118,132 +120,258 @@ def find_cps(x, N, L_th, min_length=100):
     
     return split(x, x_start, x_end, N, L_th, min_length)
 
+def find_cps_2(dfp, TimeRes, Nperm, Lth=0.98):
+    
+    sm=1
+    filterOut = np.round(600/TimeRes).astype('int')
+    SamplePoints=np.arange(0, len(dfp), filterOut)
+    front= smooth(dfp.nucleus.values[SamplePoints], sm)
+    rear = smooth(dfp.rear.values[SamplePoints], sm)
+    nucleus = smooth(dfp.nucleus.values[SamplePoints], sm)
+    
+    nucleus=nucleus-nucleus[0]
+    front=front-front[0]
+    rear = rear-rear[0]
+    
+    t = dfp.frame.values[SamplePoints]-dfp.frame.values[0]
+    vnuc=np.gradient(nucleus,t)
+    vrear=np.gradient(rear,t)
+    vfront=np.gradient(front,t);
+    initpoint=0
+    endpoint=vnuc.size
+    CPs=np.array((initpoint, endpoint))
+    maxintwithnoPC=0 # intervals that has been checked and contain no more PC
+    endloop=0
+    repeatfind=0
+    while endloop==0:
+        print('into the loop')
+        print(CPs)
+        intstart=CPs[maxintwithnoPC]
+        intend=CPs[maxintwithnoPC+1]
+        vseg=vnuc[intstart:intend]
+        meanvseg=vseg.mean()
+        S_0=cp.S(vseg)
+        Sdiff0=S_0.max()-S_0.min();
+        Sdiff=[]
         
-def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30, coarsen=20):
+        X_boot = np.vstack(
+        [vseg.copy() for i in range(Nperm)])
+    
+        for i in range(Nperm):
+            np.random.shuffle(X_boot[i])    
+    
+        S_boot = S(X_boot, axis=1)
+    
+        Sdiff = np.max(S_boot, axis=1) - np.min(S_boot, axis=1)
+        
+        Lconf=np.mean(Sdiff<Sdiff0)
+        print(Lconf)
+        if Lconf>Lth:
+            indScp=np.argmax(np.abs(S_0[1:-2]))
+            IndScp=indScp+1+intstart-1; #index of the max S in the original vC vector(indScp is the index in vseg)
+            if not IndScp in CPs:
+                CPs=np.concatenate((CPs, [IndScp]))
+                CPs.sort()
+            
+        else:
+            maxintwithnoPC=maxintwithnoPC+1
+        
+        if maxintwithnoPC==CPs.size-1: #if the index of maximum interval with no CP is equal to all current interval.
+            endloop=1
+        
+    if CPs.size>2:
+        shortloop=0
+        j=1
+        while shortloop==0:
+            if CPs[j]-CPs[j-1]<(15*2/filterOut):
+                CPs=np.delete(CPs, j)
+            else:
+                j=j+1
+            if j==CPs.size:
+                shortloop=1
+    
+    return CPs
+        
+def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30, coarsen=int(20/4), Nperm=1000, Lth=0.98, Oth=5):
     
     nucleus = dfp.nucleus.values
     rear = dfp.rear.values
     t = dfp.frame.values
     front = dfp.front.values
-    #v_nuc = dfp.v_nuc.values
-    #v_front=dfp.v_front.values
-    #v_rear = dfp.v_rear.values
-    
-    dfp.loc[:, 'motion']=['' for i in range(len(dfp))]
-    
-    #Boolean array: True for cells that should be left out
-    my_bool = ~((dfp.valid==1) & (dfp.too_close==0) & (dfp.single_nucleus==1) & (dfp.front!=0)).values
-    
-    #Points where there is a boundary between valid and non valid cells
-    boundaries = find_boundaries(my_bool, mode='outer', background=0)
-    boundaries = np.argwhere(boundaries)
-    
-    #If there are no boundaries, no need to check for valid segments
-    if boundaries.size<2:
-        coarse_frames = np.linspace(0, nucleus.size-1, round(nucleus.size/coarsen)).astype(int)
-        nuc_coarse = nucleus[coarse_frames]
-        v_nuc_coarse = np.gradient(nuc_coarse, t[coarse_frames])
-    
-        cp_indices = find_cps(v_nuc_coarse, 10000 , 0.7, min_length)*coarsen
-        boundaries = np.array([])
 
-        cp_indices = np.concatenate(([0, t.size], cp_indices))
+
+    coarse_frames = np.linspace(0, nucleus.size-1, round(nucleus.size/coarsen)).astype(int)
+    nuc_coarse = nucleus[coarse_frames]
+    
+    v_nuc_coarse = np.gradient(nuc_coarse, t[coarse_frames])
+
+    cp_indices = find_cps(v_nuc_coarse, Nperm , Lth, min_length)*coarsen
+    boundaries = np.array([])
+
+    cp_indices = np.concatenate(([0, t.size], cp_indices))
+    
+    #Now classify the motion
+    sorted_cps = cp_indices.copy().astype(int)
+    sorted_cps.sort()
+   
+    for i in range(sorted_cps.size-1):
         
-        #Now classify the motion
-        sorted_cps = cp_indices.copy().astype(int)
-        sorted_cps.sort()
+        cp_0, cp_1 = sorted_cps[i], sorted_cps[i+1]
+        segment = (t>=cp_0) & (t<cp_1)    
+        # print('classifying')
+        # print(cp_0, cp_1)
+        t_current = t[cp_0:cp_1]
+        nucleus_current = nucleus[cp_0:cp_1]
+        front_current = front[cp_0:cp_1]
+        rear_current = rear[cp_0:cp_1]
+        L = front_current-rear_current
+
+        if t_current.size<302/4:
+            #print('Too short')
+            
+            continue 
+
+        V = classify_velocity(nucleus_current, t_current, v_min, 1/fps, pixelperum=pixelperum)
+        O = classify_oscillation(L, nucleus_current, t, pixelperum, Oth)
+        #print('classified')
+        #print(V, O)
+        segment = dfp.frame.isin(t_current)
+        #print(len(segment==True))
+
+        dfp.loc[segment, 'O']=O
+        dfp.loc[segment, 'V']=V
+
+        mov_dir = np.sign(V)*(np.abs(V)>v_min)
+        if mov_dir!=0:
+            dfp.loc[segment, 'motion']='M'
+        else:
+            dfp.loc[segment, 'motion']='S'
         
-        for i in range(sorted_cps.size-1):
+        if mov_dir!=0 and O>=Oth :
+            dfp.loc[segment, 'state']='MO'
+        elif mov_dir!=0 and O<Oth:
+            dfp.loc[segment, 'state']='MS'
+        elif mov_dir==0 and O>Oth:
+            dfp.loc[segment, 'state']='SO'
+        elif mov_dir==0 and O<Oth:
+            dfp.loc[segment, 'state']='SS'
+
+    return dfp, cp_indices
+
+
+
+def classify_velocity(x, t, v_min, tres, pixelperum, sm=3):
+
+    x_smooth = smooth(x, sm)
+    v = np.gradient(x_smooth, t)
+
+    v = v/(pixelperum*tres)
+    v_mean = v.mean()
+
+    #return np.sign(v_mean)*(np.abs(v_mean)>v_min)
+    return v_mean
+
+def classify_oscillation(L, nucleus, t, pixelperum, Omin=5, min_episode=20, sm=int(300/4)):
+    sm = int(300/16)
+    min_episode=5
+    #print(t.size, L.size)
+    #print(L.size)
+    L = functions.remove_peaks(L)
+    L_filt = (smooth(L, min_episode) - smooth(L, sm))/pixelperum
+    nuc_filt = (smooth(nucleus, min_episode) - smooth(nucleus, sm))/pixelperum
+    import matplotlib.pyplot as plt
+    if DEBUG:
+        plt.subplots()
+        plt.plot(t, smooth(L, min_episode), color='blue')
+        plt.plot(t, smooth(L, sm), color='red')
+        plt.show()
+
+    O = np.mean(np.abs(
+        L_filt[int(min_episode/2):-int(min_episode/2)])
+        + np.abs(nuc_filt[int(min_episode/2):-int(min_episode/2)]))
+
+    #print('O', O)
+    return O
+
+def get_cps(dfp, TimeRes, Nperm, Lth=0.98):
+    
+    sm=1
+    filterOut = np.round(600/TimeRes).astype('int')
+    SamplePoints=np.arange(0, len(dfp), filterOut)
+    front= smooth(dfp.nucleus.values[SamplePoints], sm)
+    rear = smooth(dfp.rear.values[SamplePoints], sm)
+    nucleus = smooth(dfp.nucleus.values[SamplePoints], sm)
+    
+    nucleus=nucleus-nucleus[0]
+    front=front-front[0]
+    rear = rear-rear[0]
+    
+    t = dfp.frame.values[SamplePoints]-dfp.frame.values[0]
+    vnuc=np.gradient(nucleus,t)
+    vrear=np.gradient(rear,t)
+    vfront=np.gradient(front,t);
+    initpoint=0
+    endpoint=vnuc.size
+    CPs=np.array((initpoint, endpoint))
+    maxintwithnoPC=0 # intervals that has been checked and contain no more PC
+    endloop=0
+    repeatfind=0
+    while endloop==0:
+        #print('into the loop')
+        #print(CPs)
+        intstart=CPs[maxintwithnoPC]
+        intend=CPs[maxintwithnoPC+1]
+        vseg=vnuc[intstart:intend]
+        meanvseg=vseg.mean()
+        S_0=cp.S(vseg)
+        Sdiff0=S_0.max()-S_0.min();
+        Sdiff=[]
+        
+        X_boot = np.vstack(
+        [vseg.copy() for i in range(Nperm)])
+    
+        for i in range(Nperm):
+            np.random.shuffle(X_boot[i])    
+    
+        S_boot = cp.S(X_boot, axis=1)
+    
+        Sdiff = np.max(S_boot, axis=1) - np.min(S_boot, axis=1)
+        
+        Lconf=np.mean(Sdiff<Sdiff0)
+        #print(Lconf)
+        if Lconf>Lth:
+            indScp=np.argmax(np.abs(S_0[1:-2]))
+            IndScp=indScp+1+intstart-1; #index of the max S in the original vC vector(indScp is the index in vseg)
+            if not IndScp in CPs:
+                CPs=np.concatenate((CPs, [IndScp]))
+                CPs.sort()
             
-            cp_0, cp_1 = sorted_cps[i], sorted_cps[i+1]
-            segment = (t>=cp_0) & (t<cp_1)    
-
-            t_current = t[cp_0:cp_1]
-            if t_current.size<1:
-                continue 
-
-            nucleus_current = nucleus[cp_0:cp_1]
-
-            dt = (t_current[-1]-t_current[0])/fps
-            
-            v_mean = ((nucleus_current[-1]-nucleus_current[0])/pixelperum)/(dt)
-            v_mean/=(pixelperum)
-
-            #print(v_min, v_mean)
-
-            segment = dfp.frame.isin(t_current)
-            if np.abs(v_mean)>=v_min:
-                dfp.loc[segment, 'motion']='M'
+        else:
+            maxintwithnoPC=maxintwithnoPC+1
+        
+        if maxintwithnoPC==CPs.size-1: #if the index of maximum interval with no CP is equal to all current interval.
+            endloop=1
+        
+    if CPs.size>2:
+        shortloop=0
+        j=1
+        while shortloop==0:
+            if CPs[j]-CPs[j-1]<(15*2/filterOut):
+                CPs=np.delete(CPs, j)
             else:
-                dfp.loc[segment, 'motion']='S'
-
-            valid_boundaries = [0, t.size]
-
-        return dfp, cp_indices, valid_boundaries
+                j=j+1
+            if j==CPs.size:
+                shortloop=1
     
-    #Search valid segments
+    return CPs
 
-    boundaries = np.concatenate(([0], boundaries.flatten(), [nucleus.size-1]))
-    print(boundaries+t[0])
-    valid_boundaries=[]
-
-    cp_indices = np.array([])
-    for i in range(boundaries.size-1):
-
-        start, end = boundaries[i], boundaries[i+1]
-        
-        if (end-start)<min_length:
-        
-            continue
-        if my_bool[start:end].mean()>0.1:
-            
-            #This is a non valid cell
-            continue
-        
-        print('going from', t[start], t[end])
-        #Coarsen the frames for the motion classification
-        coarse_frames = np.linspace(start, end-1, round((end-start)/coarsen)).astype(int)
-        nuc_coarse = nucleus[coarse_frames]
-
-        t_coarse = t[coarse_frames]
-        v_nuc_coarse = np.gradient(nuc_coarse, t_coarse)
-
-        cp_indices_current = find_cps(v_nuc_coarse, 10000 , 0.7, min_length)*coarsen
-        
-        cp_indices_current+=start
-        cp_indices = np.concatenate((cp_indices, cp_indices_current))
-        cp_indices_current = np.concatenate(([start, end], cp_indices_current))
-        
-        #Now classify the motion
-        sorted_cps = cp_indices_current.copy().astype(int)
-        sorted_cps.sort()
-        print(sorted_cps, 'cp_indices')
-        
-        for i in range(sorted_cps.size-1):
-            
-            cp_0, cp_1 = sorted_cps[i], sorted_cps[i+1]
-            segment = (t>=cp_0) & (t<cp_1)    
-
-            t_current = t[cp_0:cp_1]
-            if t_current.size<1:
-                continue 
-
-            nucleus_current = nucleus[cp_0:cp_1]
-
-            dt = (t_current[-1]-t_current[0])/fps
-            
-            v_mean = ((nucleus_current[-1]-nucleus_current[0])/pixelperum)/(dt)
-            v_mean/=(pixelperum)
-
-            print(v_min, v_mean)
-
-            segment = dfp.frame.isin(t_current)
-            if np.abs(v_mean)>=v_min:
-                dfp.loc[segment, 'motion']='M'
-            else:
-                dfp.loc[segment, 'motion']='S'
-
-            valid_boundaries.append([start, end])
-
-    return dfp, cp_indices, valid_boundaries
-
+def smooth(a,ws):
+    # a: NumPy 1-D array containing the data to be smoothed
+    # WSZ: smoothing window size needs, which must be odd number,
+    # as in the original MATLAB implementation
+    ws += not (ws%2)
+    out0 = np.convolve(a,np.ones(ws,dtype=int),'valid')/ws   
+    r = np.arange(1,ws-1,2)
+    start = np.cumsum(a[:ws-1])[::2]/r
+    stop = (np.cumsum(a[:-ws:-1])[::2]/r)[::-1]
+    return np.concatenate((start , out0, stop)) 

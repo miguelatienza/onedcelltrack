@@ -21,6 +21,7 @@ except:
 from scipy import signal as sg
 from skimage.transform import rescale
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 def extract_from_tif(cytoplasm_file=None, nucleus_file=None, lanes_file=None, image_indices=None, x_range=None, y_range=None, data_path=None, get_metadata=True): 
@@ -471,8 +472,8 @@ def get_edges(kymo):
     
 
 def np_to_mp4(x, out, crf=0, rate=10, vf=None):
-    
-    
+        
+
     import skvideo.io
     from tqdm import tqdm    
 
@@ -484,15 +485,17 @@ def np_to_mp4(x, out, crf=0, rate=10, vf=None):
       #other options see https://trac.ffmpeg.org/wiki/Encode/H.264
     }
 
+    # inputdict={
+    #   '-r': str(rate),
+    #   'crf':str(crf)
+    # }
+
     if vf is not None:
         outputdict['vf']=vf
 
     writer = skvideo.io.FFmpegWriter(out, 
-        inputdict={
-      '-r': str(rate)
-      #other options see https://trac.ffmpeg.org/wiki/Encode/H.264
-    },
-        outputdict=outputdict)
+        #inputdict=inputdict,
+      outputdict=outputdict)
 
     print(f'Encoding array to {os.path.basename(out)}...')
     for frame in tqdm(x):
@@ -522,8 +525,22 @@ def tifs_to_mp4(dir, crf=0):
         np_to_mp4(x, video_file, crf=crf)    
 
 def mp4_to_np(file, frames=None, as_grey=True):
-
+   
+    filename = Path(file)
     #print(f'Reading {os.path.basename(file)} ...')
+    if os.path.isfile(file+'.npz'):
+        x = np.load(file+'.npz').f.arr_0
+        return x
+    elif os.path.isfile(filename.with_suffix('.npz')):
+        loader = np.load(str(filename.with_suffix('.npz')))
+        x = loader.f.arr_0
+        del loader
+        return x
+    elif file.endswith('.npz'):
+        x = np.load(file).f.arr_0
+        return x
+    
+        
     import skvideo.io
 
     if frames is not None:
@@ -542,6 +559,7 @@ def mp4_to_np(file, frames=None, as_grey=True):
           
     #print('Done Reading')
     return x
+
     
 def remove_peaks(x, max_step=5, max_peak_width=5):
 
@@ -788,6 +806,7 @@ def gpu_hough(image, delta_y_max, kernel_width, max_y_0_size=100, debug=False):
         return hough.get()
     
     scaling = 0.25
+    print('rescaling')
     image_rescaled = rescale(image, scaling, anti_aliasing=True)
     h,w = image_rescaled.shape
     delta_y_array = np.arange(int(-h/2), int(h/2) + 1)
@@ -915,7 +934,8 @@ def get_lane_mask(image, delta_y_max=20, kernel_width=5, line_distance=30, thres
     Returns:
         Mask image containing 0s where there is no lane, and a different integer for every separate line.
     """
-
+    print(gpu)
+    
     #print('Detecting lanes...')
     h, w = image.shape
     if not gpu:
@@ -925,9 +945,9 @@ def get_lane_mask(image, delta_y_max=20, kernel_width=5, line_distance=30, thres
         max_coordinates = peak_local_max(-myhough, min_distance=line_distance, exclude_border=False, threshold_rel=threshold)
     
     if gpu:
-        
+        print('doing this')
         min_coordinates, max_coordinates = gpu_hough(image, delta_y_max, kernel_width)
-
+        print('done')
     delta_y_array = np.arange(-delta_y_max, delta_y_max+1)
     # max_coordinates_sorted = max_coordinates.copy()
     # min_coordinates_sorted = min_coordinates.copy()

@@ -14,6 +14,9 @@ import trackpy as tp
 from tqdm import tqdm
 from skimage.segmentation import find_boundaries
 import pandas as pd
+from .classify import tools
+from .classify import cp
+pd.options.mode.chained_assignment = None
 
 def track(nuclei, diameter=19, minmass=None, track_memory=15, max_travel=5, min_frames=10, pixel_to_um=1, verbose=False):
     """
@@ -133,13 +136,18 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns):
             continue
         
         #Now extract the positions
-        try:
-            rear, front, lane_index = get_cyto_positions(lanes_mask, lanes_metric, binary_cyto_mask, lonely_nuclei, min_overlap=0.5)
-        except TypeError:
+        
+        rear, front, lane_index, two_lanes = get_cyto_positions(lanes_mask, lanes_metric, binary_cyto_mask, lonely_nuclei, min_overlap=0.5)
+        
+        if rear is None:
             #Cell touches more than one lane or no lanes or has too small of an overlap
             df.loc[df.particle==particle, 'valid']=valid*0
             continue
-
+        
+        if two_lanes:
+            ##Set this particle to non valid, but still calculate front rear and so on in order to filter properly later one for double nuclei cells and cells too close to one another
+            df.loc[df.particle==particle, 'valid']=valid*0
+                      
         nucleus = lanes_metric[np.round(p_y).astype(int), np.round(p_x).astype(int)]
 
         #Calculate footprint
@@ -214,7 +222,7 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns):
             #Now build pairs of boundaries between which to interpolate
             island_boundaries = island_boundaries.reshape(int(island_boundaries.size/2), 2)
         except ValueError:
-            raise ValueError('Not even dimesions')
+            raise ValueError('Not even dimensions')
 
         #Finally interpolate
         for boundary in island_boundaries:
@@ -246,6 +254,7 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns):
 
 def get_cyto_positions(lanes_mask, lanes_metric, binary_cyto_mask, lonely_nuclei, min_overlap=0.5):
 
+    two_lanes = False
     n_frames = binary_cyto_mask.shape[0]
     img_size = int(binary_cyto_mask.shape[1]*binary_cyto_mask.shape[2])
 
@@ -255,16 +264,24 @@ def get_cyto_positions(lanes_mask, lanes_metric, binary_cyto_mask, lonely_nuclei
     #Find which line this mask corresponds to
     lane_index_mask = binary_cyto_mask[coarse_frames]*lanes_mask[np.newaxis, :, :]
     
-    lane_index = np.unique(lane_index_mask[lane_index_mask>0])
+    lane_index, counts = np.unique(lane_index_mask[lane_index_mask>0], return_counts=True)
+    ##normalize the counts
+    counts = counts/counts.sum()
     
     if lane_index.size>1:
         #Cell touches two different lanes
-        print('cell touches more than one line')
-        return
+        #print('cell touches more than one line')
+        ##allow for only 1 percent of the track being 
+        if np.any((counts>0.01) & (counts<0.99)):
+            ##Some lane index is present more than 1 percent of the area and time.
+            two_lanes = True
+        
+        lane_index = lane_index[np.argmax(counts)]
+        
     elif lane_index.size<1:
         #Cell does not touch any lines
         #print('cell touches no lines')
-        return
+        return None, None, None, None
     else:
         lane_index = lane_index[0]
     
@@ -282,7 +299,7 @@ def get_cyto_positions(lanes_mask, lanes_metric, binary_cyto_mask, lonely_nuclei
 
     if overlap < min_overlap:
     #This cell does not overlap very well with the lane
-         return
+         return None, None, None, None
     
     #binary_cyto_mask[binary_cyto_mask==0]=np.nan
     distance = lanes_metric[np.newaxis, :]*binary_cyto_mask
@@ -293,7 +310,7 @@ def get_cyto_positions(lanes_mask, lanes_metric, binary_cyto_mask, lonely_nuclei
     
     rear = np.min(distance, axis=1)
 
-    return rear, front, lane_index
+    return rear, front, lane_index, two_lanes
 
 
 def get_single_cells(df):
@@ -304,7 +321,7 @@ def get_single_cells(df):
     ids = df.particle.unique()
     #ids = np.arange(uniques.size)
 
-    for i in (ids):
+    for i in tqdm(ids):
 
         particle = i
         dfp = df[df.particle==particle]
@@ -313,7 +330,7 @@ def get_single_cells(df):
 
         #Check positions where the mask is shared between two nuclei
         double_nuclei_frames = pd.merge(dfp, dfnp,  how='inner', on=['frame','cyto_locator']).frame.values
-        df.loc[(df.particle==particle) & (df.frame.isin(double_nuclei_frames)), 'single_nucleus']=0
+        df.loc[(df.particle==particle) & (df.frame.isin(double_nuclei_frames)), 'single_nucleus']=False
         #df.loc[(df.particle==particle) & (df.frame.isin(double_nuclei_frames)), 'single_nucleus']=0
         
     return df
@@ -326,7 +343,7 @@ def remove_close_cells(df, min_distance=10):
     #df = df[(df.valid==1) & (df.front!=0)]
     ids = df.particle.unique()
     
-    for i in (ids):
+    for i in tqdm(ids):
 
         particle = i
         dfp = df[df.particle==particle]
@@ -355,42 +372,71 @@ def remove_close_cells(df, min_distance=10):
     return df
 
 def get_clean_tracks(df, max_interpolation=3):
+    ##filtering and segmenting
+    clean_df = get_single_cells(df)
+    clean_df = remove_close_cells(clean_df)
 
-    ##filtering
+    clean_df.loc[:, 'segment']=np.zeros(len(clean_df), dtype=int)
 
-    my_bool = ((df.valid==1) & (df.too_close==0) & (df.single_nucleus==1) & (df.front!=0))
-
-    clean_df = df.loc[my_bool, :].copy()
     ids = clean_df.particle.unique()
-    for particle in (ids):
-        dfp = clean_df[clean_df.particle==particle]
+    for particle in ids:
+
+        dfp = clean_df.loc[clean_df.particle==particle, :]
+        invalid = ~((dfp.valid==1) & (dfp.too_close==0) & (dfp.single_nucleus==1) & (dfp.front!=0) & (dfp.rear!=0)).values
+        dfp = tools.segment_dfp(dfp, invalid, min_length=30)
+
+        segments = np.unique(dfp.segment.values)
+        #print(segments)
+        for segment in segments[segments!=0]:
         
-        if len(dfp)<3:
-            continue
+            where = (dfp.segment==segment).values
+            
+            dfps = dfp[where]
 
-        t = dfp.frame.values
+            t = dfps.frame.values
 
-        dts = np.diff(t)
+            dts = np.diff(t)
 
-        if dts.max()>max_interpolation:
-            pass
-            #clean_df=clean_df[clean_df.particle!=particle]
-            #continue
-             
-        clean_df.loc[clean_df.particle==particle, 'nucleus'] = functions.remove_peaks(dfp.nucleus.values)
-        clean_df.loc[clean_df.particle==particle, 'rear'] = functions.remove_peaks(dfp.rear.values)
-        clean_df.loc[clean_df.particle==particle, 'front'] = functions.remove_peaks(dfp.front.values)
-        v_nuc = np.gradient(dfp.nucleus.values, dfp.frame.values)
-        v_front = np.gradient(dfp.front.values, dfp.frame.values)
-        v_rear = np.gradient(dfp.rear.values, dfp.frame.values)
-        length = np.gradient(dfp.rear.values, dfp.frame.values)
-        v_length = np.gradient(length, dfp.frame.values)
-  
-        clean_df.loc[clean_df.particle==particle, 'v_nuc']=v_nuc
-        clean_df.loc[clean_df.particle==particle, 'v_front'] = v_front 
-        clean_df.loc[clean_df.particle==particle, 'v_rear'] = v_rear
-        clean_df.loc[clean_df.particle==particle, 'length'] = length
-        clean_df.loc[clean_df.particle==particle, 'v_length'] = v_length
+            if dts.max()>max_interpolation:
+                pass
+                #clean_df=clean_df[clean_df.particle!=particle]
+                #continue
+                
+            dfp.loc[where, 'nucleus'] = functions.remove_peaks(dfps.nucleus.values)
+            dfp.loc[where, 'rear'] = functions.remove_peaks(dfps.rear.values)
+            dfp.loc[where, 'front'] = functions.remove_peaks(dfps.front.values)
+            v_nuc = np.gradient(dfps.nucleus.values, dfps.frame.values)
+            v_front = np.gradient(dfps.front.values, dfps.frame.values)
+            v_rear = np.gradient(dfps.rear.values, dfps.frame.values)
+            length = np.gradient(dfps.rear.values, dfps.frame.values)
+            v_length = np.gradient(length, dfps.frame.values)
+    
+            dfp.loc[where, 'v_nuc']=v_nuc
+            dfp.loc[where, 'v_front'] = v_front 
+            dfp.loc[where, 'v_rear'] = v_rear
+            dfp.loc[where, 'length'] = length
+            dfp.loc[where, 'v_length'] = v_length
+            dfp.loc[where, 'segment'] = segment
 
+        clean_df[clean_df.particle==particle]=dfp
 
     return clean_df
+
+def classify_tracks(df, tres):
+    
+    df['motion']=''
+    df['state']=''
+    df['V']=np.nan
+    df['O']=np.nan
+    
+    ids = df.particle.unique()
+    
+    for particle in ids:
+        segments = df.loc[df.particle==particle, 'segment'].unique()
+        for segment in segments[segments!=0]:
+           
+            where = (df.particle==particle) & (df.segment==segment)
+     
+            df[where], _ = cp.classify_movement(df[where], fps=1/tres)
+
+    return df

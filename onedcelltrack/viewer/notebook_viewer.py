@@ -22,6 +22,7 @@ from skimage.morphology import binary_erosion
 from skimage.io import imread
 from ..classify import cp
 import matplotlib.collections as collections
+from .. import lane_detection
 
 class Viewer:
     def __init__(self, file, pattern_file, experiment_id=5, df=None):
@@ -179,31 +180,31 @@ class LaneViewer:
                 self.ax.plot(x, [self.max_coordinates[v][i,1], sum(self.max_coordinates[v][i])], color='red')
             
         
-    def recompute(self):
+    # def recompute(self):
 
-        vmin, vmax = self.clip.value
-        lanes_clipped = np.clip(self.lanes, vmin, vmax, dtype=self.lanes.dtype)
+    #     vmin, vmax = self.clip.value
+    #     lanes_clipped = np.clip(self.lanes, vmin, vmax, dtype=self.lanes.dtype)
 
-        self.min_coordinates = list(range(lanes_clipped.shape[0]))
-        self.max_coordinates = list(range(lanes_clipped.shape[0]))
+    #     self.min_coordinates = list(range(lanes_clipped.shape[0]))
+    #     self.max_coordinates = list(range(lanes_clipped.shape[0]))
 
-        for v in tqdm(range(lanes_clipped.shape[0])): 
+    #     for v in tqdm(range(lanes_clipped.shape[0])): 
 
-            min_c, max_c = functions.get_lane_mask(lanes_clipped[v], kernel_width=self.kernel_width, line_distance=self.ld.value, debug=True)
+    #         min_c, max_c = functions.get_lane_mask(lanes_clipped[v], kernel_width=self.kernel_width, line_distance=self.ld.value, debug=True)
             
-            self.min_coordinates.append(min_c)
-            self.max_coordinates.append(max_c)
+    #         self.min_coordinates.append(min_c)
+    #         self.max_coordinates.append(max_c)
 
-        update(v, clip)
+    #     update(v, clip)
     
     def recompute_v(self, v):
         
         v = self.v.value
         vmin, vmax = self.clip.value
-        lanes_clipped = np.clip(self.lanes, vmin, vmax, dtype=self.lanes.dtype)
+        lanes_clipped = np.clip(self.lanes[v], vmin, vmax, dtype=self.lanes.dtype)
         
         print('recomputing')
-        self.min_coordinates[v], self.max_coordinates[v] = functions.get_lane_mask(lanes_clipped[v], kernel_width=self.kernel_width, line_distance=self.ld.value, debug=True)
+        self.min_coordinates[v], self.max_coordinates[v] = lane_detection.get_lane_mask(lanes_clipped, kernel_width=self.kernel_width, line_distance=self.ld.value, debug=True, gpu=True)
         print('updating')
         self.update(v, self.clip)
         
@@ -589,8 +590,10 @@ class ResultsViewer:
 
         image = np.stack((cyto, cyto, cyto), axis=-1)
         
+        print('loading stuff')
         self.load_masks(outpath, self.v.value)
         self.load_df(self.db_path, self.v.value)
+        print('loaded')
         self.oldv=0
         self.update_lanes()
         
@@ -640,6 +643,7 @@ class ResultsViewer:
         
         self.ax2.plot(np.arange(100), np.ones(100), color='blue')
         self.tmarker=self.ax2.axvline(self.t.value, color='black', lw=1)
+        self.ax2.margins(x=0)
         
         #Organize layout and display
         #out = widgets.interactive_output(self.update, {'t': self.t, 'c': self.c, 'v': self.v, 'clip': self.clip, 'min_mass': self.min_mass, 'diameter': self.diameter, 'min_frames': self.min_frames, 'max_travel': self.max_travel})
@@ -693,13 +697,13 @@ class ResultsViewer:
 
         t, v= self.t.value, self.v.value
         scat=self.bscat
-        df = self.df[self.df.frame==self.t.value]
+        df = self.clean_df[self.clean_df.frame==self.t.value]
         
         data = np.hstack((df.x.values[:,np.newaxis], df.y.values[:, np.newaxis]))
         scat.set_offsets(data)
         
         scat=self.lscat
-        df = self.clean_df[self.clean_df.frame==self.t.value]
+        df = df[(df.segment>0)]
         
         data = np.hstack((df.x.values[:,np.newaxis], df.y.values[:, np.newaxis]))
         scat.set_offsets(data)
@@ -796,23 +800,24 @@ class ResultsViewer:
             self.lane_ids = np.unique(self.df.Lane_id.values)
             self.lane_ids.sort()
 
-            self.df['particle']=self.df.particle_id  
-            self.df = tracking.get_single_cells(self.df)
-            self.df = tracking.remove_close_cells(self.df)
+            #self.df['particle']=self.df.particle_id  
+            # self.df = tracking.get_single_cells(self.df)
+            # self.df = tracking.remove_close_cells(self.df)
             
-            self.clean_df = tracking.get_clean_tracks(self.df)
+            # self.clean_df = tracking.get_clean_tracks(self.df)
         
             conn.close()
         
         else:
-
+            
             self.df = pd.read_csv(f'{self.outpath}/XY{fov}/tracking_data.csv')
       
-            self.df['particle_id']=self.df.particle  
-            self.df = tracking.get_single_cells(self.df)
-            self.df = tracking.remove_close_cells(self.df)
+            #self.df['particle_id']=self.df.particle  
+            #self.df = tracking.get_single_cells(self.df)
+            #self.df = tracking.remove_close_cells(self.df)
             
-            self.clean_df = tracking.get_clean_tracks(self.df)
+            self.clean_df = pd.read_csv(f'{self.outpath}/XY{fov}/clean_tracking_data.csv')
+            #self.clean_df = tracking.get_clean_tracks(self.df)
             #self.df = self.clean_df
             #self.clean_df = pd.read_csv('/project/ag-moonraedler/MAtienza/UNikon_gradients_27_05_22/extraction/XY0/clean_tracking_data.csv')
 
@@ -824,6 +829,15 @@ class ResultsViewer:
         
         return      
         
+    
+    def onclick_plot(self, event):
+    
+        t = event.xdata
+        self.t.value=t
+        self.update(self.t.value, self.c.value, self.v.value, self.clip.value, self.min_mass.value, self.diameter.value, self.min_frames.value, self.max_travel.value)
+        
+        return
+
     def onclick(self, event):
         
         ix, iy = event.xdata, event.ydata
@@ -831,56 +845,79 @@ class ResultsViewer:
         self.coords = (ix, iy)
         
         mask_id = self.masks[self.t.value, np.round(iy).astype(int), np.round(ix).astype(int)]
-        
+        print(mask_id)
         if mask_id==0:
             #No mask was clicked on
             return
         
-        self.particle_id = self.df.loc[(self.df.frame==self.t.value) & (self.df.cyto_locator==mask_id)].particle_id.values[0]
-        
-        self.dfp=self.df[self.df.particle_id==self.particle_id]
-        my_bool = ~((self.dfp.valid==1) & (self.dfp.too_close==0) & (self.dfp.single_nucleus==1) & (self.dfp.front!=0)).values
-        #self.dfp = self.dfp[my_bool]
+        particle_id = self.df.loc[(self.df.frame==self.t.value) & (self.df.cyto_locator==mask_id)].particle.values
+        if len(particle_id)<1:
+            #No mask was clicked on
+            return
+            #self.particle_id=self.particle_id[0]
+        self.particle_id=particle_id[0]
+
+        self.dfp=self.clean_df[self.clean_df.particle==self.particle_id]
 
         self.ax2.clear()
         self.ax2.plot(self.dfp.frame, self.dfp.nucleus, color='blue')
         self.ax2.plot(self.dfp.frame, self.dfp.front, color='red')
         self.ax2.plot(self.dfp.frame, self.dfp.rear, color='red')
+        self.ax2.margins(x=0)
+        
+        tres = 30
+        def t_to_frame(t):
+            return t/(tres/60)
+        def frame_to_t(frame):
+            return frame*tres/60
+
+        tax = self.ax2.secondary_xaxis('top', functions=(frame_to_t, t_to_frame))
+        tax.set_xlabel('Time in minutes')
         self.tmarker=self.ax2.axvline(self.t.value, color='black', lw=1)
 
-        #self.ax2.fill_between(my_bool, 0,1, where=my_bool, transform=self.ax2.get_xaxis_transform(), color='gray')
-        #print('hi')
-        my_bool = ~((self.dfp.valid==1) & (self.dfp.too_close==0) & (self.dfp.single_nucleus==1) & (self.dfp.front!=0)).values
-
+        low, high = self.ax2.get_ylim()
         collection = collections.BrokenBarHCollection.span_where(
-            self.dfp.frame.values, ymin=self.dfp.rear.min(), ymax=self.dfp.front.max(), where=my_bool, facecolor='gray', alpha=0.5)
+            self.dfp.frame.values, ymin=low, ymax=high, where=self.dfp.segment==0, facecolor='gray', alpha=0.5)
 
         self.ax2.add_collection(collection)
 
-        self.dfp, cp_indices, segments = cp.classify_movement(self.dfp)
+        #self.dfp, cp_indices, valid_boundaries, segments = cp.classify_movement(self.dfp)
 
-        M_bool = self.dfp.motion=='M'
-        S_bool = self.dfp.motion=='S'
-        #self.ax2.plot(self.dfp.frame, S_bool.values*150, color='green')
+        MO_bool =self.dfp.state=='MO'
+        MS_bool =self.dfp.state=='MS'
+        SO_bool =self.dfp.state=='SO'
+        SS_bool =self.dfp.state=='SS'
+       
 
         x_collection = self.dfp.frame.values
 
-        M_collection = collections.BrokenBarHCollection.span_where(
-                    x_collection, ymin=self.dfp.rear.min(), ymax=self.dfp.front.max(), where=M_bool, facecolor='red', alpha=0.2)
+        MO_collection = collections.BrokenBarHCollection.span_where(
+                    x_collection, ymin=low, ymax=high, where=MO_bool, facecolor=[1,0,1], alpha=0.2)
 
-        S_collection = collections.BrokenBarHCollection.span_where(
-                    x_collection, ymin=self.dfp.rear.min(), ymax=self.dfp.front.max(), where=S_bool, facecolor='blue', alpha=0.2)
+        MS_collection = collections.BrokenBarHCollection.span_where(
+                    x_collection, ymin=low, ymax=high, where=MS_bool, facecolor=[1,0,0], alpha=0.2)
 
-        self.ax2.add_collection(M_collection)
-        self.ax2.add_collection(S_collection)  
+        SO_collection = collections.BrokenBarHCollection.span_where(
+                    x_collection, ymin=low, ymax=high, where=SO_bool, facecolor=[0,0,1], alpha=0.2)
 
-        t_ = self.dfp.frame.values
-        cps = t_[np.clip(cp_indices.astype(int), 0, t_.size-1)]
+        SS_collection = collections.BrokenBarHCollection.span_where(
+                    x_collection, ymin=low, ymax=high, where=SS_bool, facecolor=[0,1,0], alpha=0.2)
+
+        self.ax2.add_collection(MO_collection)
+        self.ax2.add_collection(MS_collection) 
+        self.ax2.add_collection(SO_collection)
+        self.ax2.add_collection(SS_collection)  
+
+        o_change = np.concatenate(([0], np.diff(self.dfp.O.values)!=0))
+        v_change = np.concatenate(([0], np.diff(self.dfp.V.values)!=0))
+       
+        cps = np.argwhere(o_change & v_change & (self.dfp.segment.values!=0))
+        #cps = t_[np.clip(cp_indices.astype(int), 0, t_.size-1)]
         for cp_index in cps:
-            self.ax2.axvline(cp_index, color='red')
+            self.ax2.axvline(cp_index, color='green')
             
-        for boundary in t_[np.clip(np.array(segments).flatten().astype(int), 0, t_.size-1)]:
-            self.ax2.axvline(boundary, color='green')
+        # for boundary in t_[np.clip(np.array(segments).flatten().astype(int), 0, t_.size-1)]:
+        #     self.ax2.axvline(boundary, color='green')
 
         self.cyto_locator = np.zeros(self.masks.shape[0], dtype='uint8')
         
@@ -889,12 +926,4 @@ class ResultsViewer:
         self.update_image(self.t.value, self.v.value, self.clip.value)
         
         self.im.set_data(self.image)
-        return
-    
-    def onclick_plot(self, event):
-    
-        t = event.xdata
-        self.t.value=t
-        self.update(self.t.value, self.c.value, self.v.value, self.clip.value, self.min_mass.value, self.diameter.value, self.min_frames.value, self.max_travel.value)
-        
         return

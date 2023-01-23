@@ -159,6 +159,7 @@ class LaneViewer:
         box = widgets.VBox([out, widgets.VBox([self.v, self.clip, self.ld, self.button],  layout=widgets.Layout(width='400px'))])
 
         display(box)
+        
 
         
     def update(self, v, clip):
@@ -533,9 +534,10 @@ class CellposeViewer:
 
 class ResultsViewer:
     
-    def __init__(self, nd2file, outpath, db_path = '/project/ag-moonraedler/MAtienza/database/onedcellmigration.db', path_to_patterns=None):
+    def __init__(self, nd2file, outpath, base_path=None, experiment_paths=[], db_path = '/project/ag-moonraedler/MAtienza/database/onedcellmigration.db', path_to_patterns=None):
         
         self.link_dfs = {}
+        self.base_path = base_path
         self.cyto_locator=None
         self.path_to_patterns=path_to_patterns
         self.nd2file=nd2file
@@ -555,17 +557,7 @@ class ResultsViewer:
         self.v = widgets.IntSlider(min=0,max=v_max, step=1, description="v", continuous_update=False)
         
         self.clip = widgets.IntRangeSlider(min=0,max=int(2**16 -1), step=1, value=[0,12000], description="clip", continuous_update=True, width='200px')
-        
-        self.min_mass = widgets.FloatSlider(min=1e5, max=1e6, step=0.01e5, description="min_mass", value=2.65e5, continuous_update=True)
-        
-        self.diameter = widgets.IntSlider(min=9,max=21, step=2, description="diameter", value=15, continuous_update=True)
-        
-        self.min_frames = widgets.FloatSlider(min=0,max=50, step=1, value=10, description="min_frames", continuous_update=False)
-        
-        self.max_travel = widgets.IntSlider(min=3,max=50, step=1, value=5, description="max_travel", continuous_update=False)
-        
-        self.track_memory = widgets.IntSlider(min=0,max=20, step=1, value=5, description="max_travel", continuous_update=False)
-
+ 
         self.view_nuclei = widgets.Checkbox(
         value=True,
         description='Nuclei',
@@ -590,10 +582,10 @@ class ResultsViewer:
 
         image = np.stack((cyto, cyto, cyto), axis=-1)
         
-        print('loading stuff')
+        
         self.load_masks(outpath, self.v.value)
         self.load_df(self.db_path, self.v.value)
-        print('loaded')
+        
         self.oldv=0
         self.update_lanes()
         
@@ -645,16 +637,22 @@ class ResultsViewer:
         self.tmarker=self.ax2.axvline(self.t.value, color='black', lw=1)
         self.ax2.margins(x=0)
         
-        #Organize layout and display
-        #out = widgets.interactive_output(self.update, {'t': self.t, 'c': self.c, 'v': self.v, 'clip': self.clip, 'min_mass': self.min_mass, 'diameter': self.diameter, 'min_frames': self.min_frames, 'max_travel': self.max_travel})
         
         buttons = [self.t, self.c, self.v, self.clip]
         for button in buttons:
             button.observe(self.update, 'value')
-
-        self.buttons_box = widgets.VBox(buttons+ [self.view_nuclei, self.view_cellpose]) #, layout=widgets.Layout(width='400px'))
-        self.grid = widgets.HBox([self.buttons_box, fig1, fig2])
+            
+        self.file_menu = widgets.Dropdown(options=experiment_paths)
         
+        self.file_menu.observe(self.update_experiment, 'value')
+
+        self.buttons_box = widgets.VBox(buttons+ [self.view_nuclei, self.view_cellpose]) #, layout=widgets.]
+
+
+        self.left_box = widgets.VBox([self.buttons_box, self.file_menu])
+        
+        self.grid = widgets.HBox([self.left_box, fig1, fig2])
+        self.update(None)
 
     def update(self, change, t=None, c=None, v=None, clip=None):
 
@@ -679,7 +677,6 @@ class ResultsViewer:
                 self.load_df(self.db_path, v)
             self.update_tracks()
             
-            
         if self.view_cellpose.value:
             if v!=self.oldv:
                 self.load_masks(self.outpath, v)
@@ -703,7 +700,8 @@ class ResultsViewer:
         scat.set_offsets(data)
         
         scat=self.lscat
-        df = df[(df.segment>0)]
+        if 'segment' in df.columns:
+            df = df[(df.segment>0)]
         
         data = np.hstack((df.x.values[:,np.newaxis], df.y.values[:, np.newaxis]))
         scat.set_offsets(data)
@@ -834,7 +832,7 @@ class ResultsViewer:
     
         t = event.xdata
         self.t.value=t
-        self.update(self.t.value, self.c.value, self.v.value, self.clip.value, self.min_mass.value, self.diameter.value, self.min_frames.value, self.max_travel.value)
+        self.update(self.t.value, self.c.value, self.v.value, self.clip.value)
         
         return
 
@@ -875,47 +873,48 @@ class ResultsViewer:
         tax.set_xlabel('Time in minutes')
         self.tmarker=self.ax2.axvline(self.t.value, color='black', lw=1)
 
-        low, high = self.ax2.get_ylim()
-        collection = collections.BrokenBarHCollection.span_where(
-            self.dfp.frame.values, ymin=low, ymax=high, where=self.dfp.segment==0, facecolor='gray', alpha=0.5)
+        if 'segment' in self.dfp.columns:
+            low, high = self.ax2.get_ylim()
+            collection = collections.BrokenBarHCollection.span_where(
+                self.dfp.frame.values, ymin=low, ymax=high, where=self.dfp.segment==0, facecolor='gray', alpha=0.5)
 
-        self.ax2.add_collection(collection)
+            self.ax2.add_collection(collection)
 
-        #self.dfp, cp_indices, valid_boundaries, segments = cp.classify_movement(self.dfp)
+            #self.dfp, cp_indices, valid_boundaries, segments = cp.classify_movement(self.dfp)
 
-        MO_bool =self.dfp.state=='MO'
-        MS_bool =self.dfp.state=='MS'
-        SO_bool =self.dfp.state=='SO'
-        SS_bool =self.dfp.state=='SS'
-       
+            MO_bool =self.dfp.state=='MO'
+            MS_bool =self.dfp.state=='MS'
+            SO_bool =self.dfp.state=='SO'
+            SS_bool =self.dfp.state=='SS'
+        
 
-        x_collection = self.dfp.frame.values
+            x_collection = self.dfp.frame.values
 
-        MO_collection = collections.BrokenBarHCollection.span_where(
-                    x_collection, ymin=low, ymax=high, where=MO_bool, facecolor=[1,0,1], alpha=0.2)
+            MO_collection = collections.BrokenBarHCollection.span_where(
+                        x_collection, ymin=low, ymax=high, where=MO_bool, facecolor=[1,0,1], alpha=0.2)
 
-        MS_collection = collections.BrokenBarHCollection.span_where(
-                    x_collection, ymin=low, ymax=high, where=MS_bool, facecolor=[1,0,0], alpha=0.2)
+            MS_collection = collections.BrokenBarHCollection.span_where(
+                        x_collection, ymin=low, ymax=high, where=MS_bool, facecolor=[1,0,0], alpha=0.2)
 
-        SO_collection = collections.BrokenBarHCollection.span_where(
-                    x_collection, ymin=low, ymax=high, where=SO_bool, facecolor=[0,0,1], alpha=0.2)
+            SO_collection = collections.BrokenBarHCollection.span_where(
+                        x_collection, ymin=low, ymax=high, where=SO_bool, facecolor=[0,0,1], alpha=0.2)
 
-        SS_collection = collections.BrokenBarHCollection.span_where(
-                    x_collection, ymin=low, ymax=high, where=SS_bool, facecolor=[0,1,0], alpha=0.2)
+            SS_collection = collections.BrokenBarHCollection.span_where(
+                        x_collection, ymin=low, ymax=high, where=SS_bool, facecolor=[0,1,0], alpha=0.2)
 
-        self.ax2.add_collection(MO_collection)
-        self.ax2.add_collection(MS_collection) 
-        self.ax2.add_collection(SO_collection)
-        self.ax2.add_collection(SS_collection)  
+            self.ax2.add_collection(MO_collection)
+            self.ax2.add_collection(MS_collection) 
+            self.ax2.add_collection(SO_collection)
+            self.ax2.add_collection(SS_collection)  
 
-        o_change = np.concatenate(([0], np.diff(self.dfp.O.values)!=0))
-        v_change = np.concatenate(([0], np.diff(self.dfp.V.values)!=0))
-       
-        cps = np.argwhere(o_change & v_change & (self.dfp.segment.values!=0))
-        #cps = t_[np.clip(cp_indices.astype(int), 0, t_.size-1)]
-        for cp_index in cps:
-            self.ax2.axvline(cp_index, color='green')
-            
+            o_change = np.concatenate(([0], np.diff(self.dfp.O.values)!=0))
+            v_change = np.concatenate(([0], np.diff(self.dfp.V.values)!=0))
+        
+            cps = np.argwhere(o_change & v_change & (self.dfp.state.notnull().values))
+            #cps = t_[np.clip(cp_indices.astype(int), 0, t_.size-1)]
+            for cp_index in cps:
+                self.ax2.axvline(cp_index, color='green')
+                
         # for boundary in t_[np.clip(np.array(segments).flatten().astype(int), 0, t_.size-1)]:
         #     self.ax2.axvline(boundary, color='green')
 
@@ -926,4 +925,32 @@ class ResultsViewer:
         self.update_image(self.t.value, self.v.value, self.clip.value)
         
         self.im.set_data(self.image)
+        return
+    
+    def update_experiment(self, file_name):
+
+        file_name = file_name.new
+        
+        base_path = self.base_path
+        path_to_meta_data = os.path.join(base_path, file_name, 'Experiment_data.csv')
+        experiment_data = pd.read_csv(path_to_meta_data)
+        
+        self.nd2file = os.path.join(experiment_data.Path.values[0], experiment_data.time_lapse_file.values[0])
+        
+        self.f = ND2Reader(self.nd2file)
+        self.nfov, self.nframes = self.f.sizes['v'], self.f.sizes['t']
+        
+        self.outpath= os.path.join(base_path, file_name, 'extraction') 
+        
+        ##update the sliders
+        self.t.max = self.f.sizes['t']-1
+        self.v.max = self.f.sizes['v']-1 
+        
+        self.load_masks(self.outpath, self.v.value)
+        self.load_df(self.db_path, self.v.value)
+        self.update(None)
+        #self.update()
+        #self.update_image(self.t.value, self.v.value, self.clip.value)
+        #self.update_tracks()
+        
         return

@@ -57,7 +57,7 @@ def track(nuclei, diameter=19, minmass=None, track_memory=15, max_travel=5, min_
         tp.quiet()
 
     print('Tracking nuclei using trackpy...')
-    print(diameter, minmass, track_memory, max_travel)
+    #print(diameter, minmass, track_memory, max_travel)
     f = tp.batch(nuclei, diameter=diameter, minmass=minmass)
     t = tp.link(f, max_travel, memory=track_memory)
     t = tp.filter_stubs(t, min_frames)
@@ -91,7 +91,6 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns):
         df.loc[df.particle==particle, 'interpolated']=interpolated
         df.loc[df.particle==particle, 'cyto_locator']=cyto_locator
         df.loc[df.particle==particle, 'FN_signal']=FN_signal
-
 
         return
 
@@ -155,9 +154,10 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns):
 
         #Calculate area
         area = np.sum(binary_cyto_mask, axis=(1,2))
+        lane_area = np.sum(binary_cyto_mask*lanes_mask[np.newaxis, :, :], axis=(1,2))
 
-        #Calculate FN signal
-        FN_signal = np.sum(patterns[np.newaxis, :,:]*binary_cyto_mask, axis=(1,2))/area
+        #Calculate FN signal only on the region that is on a lane
+        FN_signal = np.sum(patterns[np.newaxis, :,:]*binary_cyto_mask*lanes_mask, axis=(1,2))/lane_area
 
         ##Interpolate values and cut out at beginning and end if necessary
         island_boundaries = np.argwhere(find_boundaries(lonely_nuclei, mode='outer', background=0)).astype(int).flatten() #Boundaries of islands of lonely nuclei
@@ -321,7 +321,7 @@ def get_single_cells(df):
     ids = df.particle.unique()
     #ids = np.arange(uniques.size)
 
-    for i in tqdm(ids):
+    for i in (ids):
 
         particle = i
         dfp = df[df.particle==particle]
@@ -343,7 +343,7 @@ def remove_close_cells(df, min_distance=10):
     #df = df[(df.valid==1) & (df.front!=0)]
     ids = df.particle.unique()
     
-    for i in tqdm(ids):
+    for i in (ids):
 
         particle = i
         dfp = df[df.particle==particle]
@@ -371,19 +371,25 @@ def remove_close_cells(df, min_distance=10):
 
     return df
 
-def get_clean_tracks(df, max_interpolation=3):
+def get_clean_tracks(df, max_interpolation=3, min_length=65):
+
     ##filtering and segmenting
     clean_df = get_single_cells(df)
     clean_df = remove_close_cells(clean_df)
 
     clean_df.loc[:, 'segment']=np.zeros(len(clean_df), dtype=int)
+    clean_df['v_nuc'] = np.full(len(clean_df), np.nan, dtype=np.float64)
+    clean_df['v_front'] = np.full(len(clean_df), np.nan, dtype=np.float64) 
+    clean_df['v_rear'] = np.full(len(clean_df), np.nan, dtype=np.float64)
+    clean_df['length'] = np.full(len(clean_df), np.nan, dtype=np.float64)
+    clean_df['v_length'] = np.full(len(clean_df), np.nan, dtype=np.float64)
 
     ids = clean_df.particle.unique()
     for particle in ids:
 
         dfp = clean_df.loc[clean_df.particle==particle, :]
         invalid = ~((dfp.valid==1) & (dfp.too_close==0) & (dfp.single_nucleus==1) & (dfp.front!=0) & (dfp.rear!=0)).values
-        dfp = tools.segment_dfp(dfp, invalid, min_length=30)
+        dfp = tools.segment_dfp(dfp, invalid, min_length=min_length)
 
         segments = np.unique(dfp.segment.values)
         #print(segments)
@@ -408,10 +414,10 @@ def get_clean_tracks(df, max_interpolation=3):
             v_nuc = np.gradient(dfps.nucleus.values, dfps.frame.values)
             v_front = np.gradient(dfps.front.values, dfps.frame.values)
             v_rear = np.gradient(dfps.rear.values, dfps.frame.values)
-            length = np.gradient(dfps.rear.values, dfps.frame.values)
+            length = (dfps.front.values - dfps.rear.values)
             v_length = np.gradient(length, dfps.frame.values)
     
-            dfp.loc[where, 'v_nuc']=v_nuc
+            dfp.loc[where, 'v_nuc']= v_nuc
             dfp.loc[where, 'v_front'] = v_front 
             dfp.loc[where, 'v_rear'] = v_rear
             dfp.loc[where, 'length'] = length

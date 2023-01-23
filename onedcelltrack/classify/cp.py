@@ -5,7 +5,7 @@ from .. import functions
 DEBUG=False
 
 def S(x, axis=0):
-    
+
     S = np.cumsum(x-x.mean(), axis=axis)
     return S
 
@@ -48,11 +48,11 @@ def split(x, x_start, x_end, N, L_th, min_length=100, debug=False):
         print('next_loop')
         print(f'x_start:{x_start}, x_end:{x_end}')
 
-    if (x_end-x_start)<min_length:
+    if (x_end-x_start)<(min_length*2 +1):
         return np.array([])
     
-    L, cp_index = find_cp(x[x_start:x_end], N)
-    cp_index = (cp_index+x_start).copy()
+    L, cp_index = find_cp(x[x_start+min_length:x_end-min_length], N)
+    cp_index = (cp_index+x_start+min_length).copy()
     x_left = x[x_start:cp_index]
     x_right = x[cp_index:x_end]
     if debug:
@@ -192,7 +192,7 @@ def find_cps_2(dfp, TimeRes, Nperm, Lth=0.98):
     
     return CPs
         
-def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30, coarsen=int(20/4), Nperm=1000, Lth=0.98, Oth=5):
+def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30, coarsen=int(20/4), Nperm=1000, Lth=0.98, Oth=5, min_episode=5, sm=60):
     
     nucleus = dfp.nucleus.values
     rear = dfp.rear.values
@@ -226,13 +226,13 @@ def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30
         rear_current = rear[cp_0:cp_1]
         L = front_current-rear_current
 
-        if t_current.size<302/4:
+        if t_current.size<min_length:
             #print('Too short')
             
             continue 
 
         V = classify_velocity(nucleus_current, t_current, v_min, 1/fps, pixelperum=pixelperum)
-        O = classify_oscillation(L, nucleus_current, t, pixelperum, Oth)
+        O = classify_oscillation(L, nucleus_current, t, pixelperum, Oth, min_episode=min_episode, sm=sm)
         #print('classified')
         #print(V, O)
         segment = dfp.frame.isin(t_current)
@@ -271,13 +271,16 @@ def classify_velocity(x, t, v_min, tres, pixelperum, sm=3):
     #return np.sign(v_mean)*(np.abs(v_mean)>v_min)
     return v_mean
 
-def classify_oscillation(L, nucleus, t, pixelperum, Omin=5, min_episode=20, sm=int(300/4)):
-    sm = int(300/16)
-    min_episode=5
-    #print(t.size, L.size)
+def classify_oscillation(L, nucleus, t, pixelperum, Omin=5, min_episode=5, sm=30):
+
+    # sm = int(300/16)
+    # min_episode=5
+    # #print(t.size, L.size)
     #print(L.size)
+
     L = functions.remove_peaks(L)
     L_filt = (smooth(L, min_episode) - smooth(L, sm))/pixelperum
+
     nuc_filt = (smooth(nucleus, min_episode) - smooth(nucleus, sm))/pixelperum
     import matplotlib.pyplot as plt
     if DEBUG:

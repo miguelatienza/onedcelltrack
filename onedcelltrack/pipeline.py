@@ -669,7 +669,6 @@ class Track:
 
         if df is None:
             df = self.df
-        print('here')
         self.clean_df = tracking.get_clean_tracks(df)
         self.clean_df = tracking.classify_tracks(self.clean_df, tres=tres)
         #clean_df_path = self.df_path.split('.')[0]+'clean.csv'

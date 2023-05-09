@@ -9,14 +9,18 @@ Install onedcelltrack <br />
 `python -m pip install git +https://github.com/miguelatienza/onedcelltrack` <br />
 
 Activate the conda environment <br />
+`conda activate onedcelltrack` <br />
 
-## Usage
+## Data Processing
 Copy the notebook `templates/run_full_experiment.ipynb` to your working directory of choice.
 Activate the environment and run jupyterlab : <br />
 `conda activate onedcelltrack` <br />
 `jupyter-lab` <br />
 Fill in the notebook and run it.
 
+## Data Visualization
+There are two possible ways of viewing the data. Either in a jupyter notebook or as a website.
+### Jupyter Notebook 
 Copy the Notebook `templates/view_results.ipynb` to your working directory and view your results.
 
 

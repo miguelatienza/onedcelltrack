@@ -1,5 +1,6 @@
 # Onedcelltrack
-![Graphical abstract](https://github.com/miguelatienza/onedcelltrack/pipeline_summary.png)
+
+![image](https://github.com/miguelatienza/onedcelltrack/pipeline_summary.png)
 
 Python project for 1D automated single-cell migration assay. Pipeline which takes in a set of raw microscopy imaging data and creates 1D tracks for each detected cell's nucleus, rear and front position. The cells are first segmented using [cellpose](https://github.com/MouseLand/cellpose) and the fluorescently labeled nuclei are tracked using [trackpy](https://github.com/soft-matter/trackpy). 
 

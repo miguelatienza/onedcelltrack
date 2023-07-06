@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Onedcelltrack</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/14.6.4/nouislider.min.css">
+    <link rel="stylesheet" href="static/main.css">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  </head>
+  <body>
+    <body>
+      <nav>
+        <ul>
+          <li><a href="/">Cells</a></li>
+          <li><a href="/simulations">Simulations</a></li>
+        </ul>
+      </nav>
+    <div class="container">
+      <div class="left-column">
+        <div class="input-group">
+          <label for="channel_selector">Channel</label>
+          <select id="channel_selector">
+            {% for i in range( max_channel ) %}
+            <option value="{{ i }}">{{ i }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="input-group">
+          <label for="experiments_dropdown">Experiment</label>
+          <select id="experiments_dropdown">
+            {% for experiment in experiments %}
+            <option value="{{ experiment }}">{{ experiment }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="image-column">
+        <div>
+          <img id="img" src="data:image/jpeg;base64,{{ image }}" onclick="getPosition(event)"/>
+        </div>
+        <div class="slider-container">
+          <div class="slider-label">
+            <label for="frame_slider">Frame: </label>
+            <output id="frame_value">0/{{ max_frame }}</output>
+          </div>
+          <div class="slider">
+            <input id="frame_slider" type="range" min="0" max="{{ max_frame }}" value="0" oninput="updateSliderValue('frame_slider', 'frame_value')"/>
+          </div>
+        </div>
+        <div class="slider-container">
+          <div class="slider-label">
+            <label class="slider-label" for="fov_slider">FOV: </label>
+            <output id="fov_value">0/{{ max_fov }}</output>
+          </div>
+          <div class="slider">
+            <input id="fov_slider" type="range" min="0" max="{{ max_fov }}" value="0" oninput="updateSliderValue('fov_slider', 'fov_value')"/>
+          </div>
+        </div>
+        <div class="slider-container">
+          <div class="slider-label">  
+            <label class="slider-label" for="contrast_slider">Contrast</label>
+          </div> 
+          <div class="slider" id="contrast_slider"></div>
+        </div>
+      </div>
+      <div class="plot-column">
+        <!-- <div>
+          <img id="plot" src="data:image/jpeg;base64,{{ plot_data }}"/>
+        </div> -->
+        <div id="plot"></div>
+        <div > <b>Gray highlighted trajectories are filtered out</b> </div>
+      </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/noUiSlider/14.6.4/nouislider.min.js"></script>
+    <script src="{{url_for('static', filename='scripts.js')}}"></script>
+
+  </body>
+</html>

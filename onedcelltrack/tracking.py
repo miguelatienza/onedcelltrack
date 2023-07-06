@@ -66,7 +66,11 @@ def track(nuclei, diameter=19, minmass=None, track_memory=15, max_travel=5, min_
     return t
 
 
-def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns):
+def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns, tres=30, min_duration=None):
+    
+    if min_duration is None:
+        ##Set this to an hour
+        min_duration=int(3600/tres)
     
     df['nucleus'] = np.zeros(len(df))
     df['front'] = np.zeros(len(df))
@@ -113,8 +117,8 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns):
         valid = p.valid.values
         interpolated = p.interpolated.values
         
-        if p_x.size <10:
-            print('This track is too short')
+        if p_x.size <min_duration:
+            #print('This track is too short')
             df.loc[df.particle==particle, 'valid']=valid*0
             continue
         
@@ -371,8 +375,8 @@ def remove_close_cells(df, min_distance=10):
 
     return df
 
-def get_clean_tracks(df, max_interpolation=3, min_length=65):
-
+def get_clean_tracks(df, max_interpolation=5, min_length=6, image_height=1024):
+    
     ##filtering and segmenting
     clean_df = get_single_cells(df)
     clean_df = remove_close_cells(clean_df)
@@ -388,7 +392,8 @@ def get_clean_tracks(df, max_interpolation=3, min_length=65):
     for particle in ids:
 
         dfp = clean_df.loc[clean_df.particle==particle, :]
-        invalid = ~((dfp.valid==1) & (dfp.too_close==0) & (dfp.single_nucleus==1) & (dfp.front!=0) & (dfp.rear!=0)).values
+        invalid = ~((dfp.valid==1) & (dfp.too_close==0) & (dfp.single_nucleus==1) & (dfp.front!=0) & (dfp.rear!=0) & (dfp.nucleus!=0) & (dfp.front<image_height)).values
+        
         dfp = tools.segment_dfp(dfp, invalid, min_length=min_length)
 
         segments = np.unique(dfp.segment.values)
@@ -428,7 +433,7 @@ def get_clean_tracks(df, max_interpolation=3, min_length=65):
 
     return clean_df
 
-def classify_tracks(df, tres):
+def classify_tracks(df, tres, coarsen=3, min_episode=1, sm=6, min_length=12, pixelperum=1.31):
     
     df['motion']=''
     df['state']=''
@@ -443,6 +448,6 @@ def classify_tracks(df, tres):
            
             where = (df.particle==particle) & (df.segment==segment)
      
-            df[where], _ = cp.classify_movement(df[where], fps=1/tres)
+            df[where], _ = cp.classify_movement(df[where], fps=1/tres, v_min=0.002, min_length=min_length, pixelperum=pixelperum, coarsen=coarsen, Nperm=1000, Lth=0.98, Oth=5, min_episode=min_episode, sm=sm)
 
     return df

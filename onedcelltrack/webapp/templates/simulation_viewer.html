@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <meta charset="UTF-8" />
+    <title>Parameter Selection</title>
+    <link rel="stylesheet" href="static/main.css">
+    <link rel="stylesheet" href="static/simulations.css">
+  </head>
+  <body>
+    <nav>
+        <ul>
+            <li><a href="/">Cells</a></li>
+            <li><a href="/simulations">Simulations</a></li>
+        </ul>
+    </nav>
+    <form>
+      {% block content %}
+    <div class="container">
+      <div class="parameters">
+        {% for parameter, values in parameters.items() %}
+            <div class="parameter-container">
+              <label for="{{ parameter }}">{{ parameter }}</label>
+              <input type="number" id="{{ parameter }}" name="{{ parameter }}" step="any" min="{{ values[0] }}"  max="{{ values[2] }}" value="{{ values[1] }}" />
+              <input type="range" id="{{ parameter }}" name="{{ parameter }}" step="any" min="{{ values[0] }}" max="{{ values[2] }}" value="{{ values[1] }}"/>
+            </div>
+        {% endfor %}
+      </div>
+        {% endblock %}
+      <div class="simplots">
+        <div class="simplot" id="position-plot"></div>
+        <div class="simplot" id="kappa-plot"></div>
+        <div class="simplot" id="vr-plot"></div>
+        <div class="simplot" id="force-plot"></div>
+      </div>
+  </form>
+  <script src="{{url_for('static', filename='simulations.js')}}"></script>
+  </div>
+</body>
+      
+      
+

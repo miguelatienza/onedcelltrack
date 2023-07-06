@@ -22,6 +22,7 @@ from scipy import signal as sg
 from skimage.transform import rescale
 import matplotlib.pyplot as plt
 from pathlib import Path
+import  pandas as pd
 
 
 def extract_from_tif(cytoplasm_file=None, nucleus_file=None, lanes_file=None, image_indices=None, x_range=None, y_range=None, data_path=None, get_metadata=True): 
@@ -1132,5 +1133,12 @@ def get_spectrum(t, signal):
     return f, fft
 
 
-
-
+def get_trajectory(Experiment_path, fov=0, particle=0, segment=1):
+    try:
+        path = os.path.join(Experiment_path, 'extraction', f'XY{fov}', 'clean_tracking_data.csv')
+        df = pd.read_csv(path, index_col=0)
+    except FileNotFoundError:
+        return pd.DataFrame()
+    df = df[(df['particle']==particle) & (df['segment']==segment)]
+    
+    return df

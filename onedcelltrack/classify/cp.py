@@ -193,7 +193,25 @@ def find_cps_2(dfp, TimeRes, Nperm, Lth=0.98):
     return CPs
         
 def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30, coarsen=int(20/4), Nperm=1000, Lth=0.98, Oth=5, min_episode=5, sm=60):
-    
+    """Classify trajectories into different motion states as in Amiri et al. 2021
+
+    Args:
+        dfp (pd.DataFrame): The dataframe with a single trajectory to be classified
+
+        v_min (float, optional): Threshold velocity for Moving state. Defaults to 0.002.
+        min_length (int, optional): _description_. Defaults to 50.
+        pixelperum (float, optional): _description_. Defaults to 1.27.
+        fps (_type_, optional): _description_. Defaults to 1/30.
+        coarsen (_type_, optional): _description_. Defaults to int(20/4).
+        Nperm (int, optional): _description_. Defaults to 1000.
+        Lth (float, optional): _description_. Defaults to 0.98.
+        Oth (int, optional): _description_. Defaults to 5.
+        min_episode (int, optional): _description_. Defaults to 5.
+        sm (int, optional): _description_. Defaults to 60.
+
+    Returns:
+        _type_: _description_
+    """
     nucleus = dfp.nucleus.values
     rear = dfp.rear.values
     t = dfp.frame.values
@@ -204,8 +222,7 @@ def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30
     nuc_coarse = nucleus[coarse_frames]
     
     v_nuc_coarse = np.gradient(nuc_coarse, t[coarse_frames])
-
-    cp_indices = find_cps(v_nuc_coarse, Nperm , Lth, min_length)*coarsen
+    cp_indices = find_cps(v_nuc_coarse, Nperm , Lth, int(min_length/coarsen))*coarsen
     boundaries = np.array([])
 
     cp_indices = np.concatenate(([0, t.size], cp_indices))
@@ -227,12 +244,11 @@ def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30
         L = front_current-rear_current
 
         if t_current.size<min_length:
-            #print('Too short')
-            
+     
             continue 
 
         V = classify_velocity(nucleus_current, t_current, v_min, 1/fps, pixelperum=pixelperum)
-        O = classify_oscillation(L, nucleus_current, t, pixelperum, Oth, min_episode=min_episode, sm=sm)
+        O = classify_oscillation(L, nucleus_current, t_current, pixelperum, Oth, min_episode=min_episode, sm=sm)
         #print('classified')
         #print(V, O)
         segment = dfp.frame.isin(t_current)
@@ -251,7 +267,7 @@ def classify_movement(dfp, v_min=0.002, min_length=50, pixelperum=1.27, fps=1/30
             dfp.loc[segment, 'state']='MO'
         elif mov_dir!=0 and O<Oth:
             dfp.loc[segment, 'state']='MS'
-        elif mov_dir==0 and O>Oth:
+        elif mov_dir==0 and O>=Oth:
             dfp.loc[segment, 'state']='SO'
         elif mov_dir==0 and O<Oth:
             dfp.loc[segment, 'state']='SS'
@@ -277,23 +293,38 @@ def classify_oscillation(L, nucleus, t, pixelperum, Omin=5, min_episode=5, sm=30
     # min_episode=5
     # #print(t.size, L.size)
     #print(L.size)
+    
+    #L = functions.remove_peaks(L)
+    #nucleus = functions.remove_peaks(nucleus)
+    # #L_filt = (smooth(L, min_episode) - smooth(L, sm))/pixelperum
+    # L_straigh = np.linspace(L[0], L[-1], L.size)
+    # L_filt = (smooth(L, min_episode)-L_straigh)/pixelperum
 
-    L = functions.remove_peaks(L)
-    L_filt = (smooth(L, min_episode) - smooth(L, sm))/pixelperum
+    # nucleus_straigh = np.linspace(nucleus[0], nucleus[-1], nucleus.size)
+    # nuc_filt = (smooth(nucleus, min_episode)-nucleus_straigh)/pixelperum
 
-    nuc_filt = (smooth(nucleus, min_episode) - smooth(nucleus, sm))/pixelperum
-    import matplotlib.pyplot as plt
+    #nuc_filt = (smooth(nucleus, min_episode) - smooth(nucleus, sm))/pixelperum
+    #Adjust the length of L to be a multiple of sm
+    if L.size%sm!=0:
+        cut_left = np.floor((L.size%sm)/2).astype(int)
+        cut_right = np.ceil((L.size%sm)/2).astype(int)
+        L = L[cut_left:-cut_right]
+        nucleus = nucleus[cut_left:-cut_right]
+    
+    L_filt = (smooth_linesegs(L, sm) - smooth_linesegs(L, min_episode))/pixelperum
+    nuc_filt = (smooth_linesegs(nucleus, sm) - smooth_linesegs(nucleus, min_episode))/pixelperum
+
+
     if DEBUG:
+        import matplotlib.pyplot as plt
         plt.subplots()
         plt.plot(t, smooth(L, min_episode), color='blue')
         plt.plot(t, smooth(L, sm), color='red')
         plt.show()
 
-    O = np.mean(np.abs(
-        L_filt[int(min_episode/2):-int(min_episode/2)])
-        + np.abs(nuc_filt[int(min_episode/2):-int(min_episode/2)]))
 
-    #print('O', O)
+    O = np.nanmedian(np.abs(L_filt))+ np.nanmedian(np.abs(nuc_filt))
+
     return O
 
 def get_cps(dfp, TimeRes, Nperm, Lth=0.98):
@@ -378,3 +409,25 @@ def smooth(a,ws):
     start = np.cumsum(a[:ws-1])[::2]/r
     stop = (np.cumsum(a[:-ws:-1])[::2]/r)[::-1]
     return np.concatenate((start , out0, stop)) 
+
+def smooth_linesegs(x, sm):
+    """Smoothen x by making straight lines between every sm points.
+
+    Args:
+        x (_type_): Array to be smoothened
+        sm (_type_): the width of the smoothening filter
+    """
+    assert x.size>=sm, "The size of the array must be larger than or equal to the smoothening filter"
+
+    #Create a copy of x
+    x_out = x.copy()
+    n_valid_points = np.round(x.size/sm).astype(int)+1
+    
+    valid_points = np.linspace(0, x.size-1, n_valid_points).astype(int)
+
+    x_out[valid_points[1:-1]] = smooth(x, int(sm/2))[valid_points[1:-1]]
+
+    points_to_interpolate = np.arange(0, x.size)
+    points_to_interpolate = np.delete(points_to_interpolate, valid_points)
+    x_out[points_to_interpolate] = np.interp(points_to_interpolate, valid_points, x_out[valid_points])
+    return x_out

@@ -20,6 +20,8 @@ import pandas as pd
 from skvideo import io
 import json
 from nd2reader import ND2Reader
+import glob
+from trackpy import SubnetOversizeException
 
 
 class Track:
@@ -479,7 +481,10 @@ class Track:
         del nuclei
         return
 
-    def detect_lanes(self, lane_distance=30, low_clip=300, high_clip=2000):
+    def detect_lanes(self, lane_distance=30, low_clip=300, high_clip=2000, lane_fov=None, v_rel=0.5):
+
+        if lane_fov is None:
+            lane_fov = self.fov
 
         path_to_image = os.path.join(self.data_path, self.lanes_file)
 
@@ -489,13 +494,13 @@ class Track:
         
         elif path_to_image.endswith('.nd2'):
 
-            lanes_image = functions.read_nd2(path_to_image, self.fov)
+            lanes_image = functions.read_nd2(path_to_image, lane_fov)
 
         lanes_image = np.clip(lanes_image, low_clip, high_clip)
 
         self.lanes_mask, self.lanes_metric = lane_detection.get_lane_mask(
-            lanes_image, kernel_width=5, line_distance=lane_distance
-            )
+            lanes_image, kernel_width=5, line_distance=lane_distance,
+            threshold=v_rel)
         self.n_lanes = self.lanes_mask.max()
 
         try:
@@ -509,7 +514,7 @@ class Track:
 
         return
 
-    def get_locations(self, df=None, cyto_masks_path=None):
+    def get_locations(self, df=None, cyto_masks_path=None, tres=30):
 
         if df is not None:
             self.df = df
@@ -528,7 +533,7 @@ class Track:
             self.lanes_mask
             path_to_patterns = os.path.join(self.data_path, self.lanes_file)
             patterns = functions.read_nd2(path_to_patterns, self.fov)
-            self.df = tracking.get_tracking_data(self.df, cyto_masks, self.lanes_mask, self.lanes_metric, patterns)
+            self.df = tracking.get_tracking_data(self.df, cyto_masks, self.lanes_mask, self.lanes_metric, patterns, tres=30)
             
             self.df.index.names = ['Index']
 
@@ -542,7 +547,7 @@ class Track:
             lanes_dir = os.path.join(self.path_out, 'lanes')
             self.lanes_mask = imread(os.path.join(lanes_dir, 'lanes_mask.tif'))
             self.lanes_metric = imread(os.path.join(lanes_dir, 'lanes_metric.tif'))
-            self.df = tracking.get_tracking_data(self.df, cyto_masks, self.lanes_mask, self.lanes_metric, patterns)
+            self.df = tracking.get_tracking_data(self.df, cyto_masks, self.lanes_mask, self.lanes_metric, patterns, tres=30)
 
             # self.df = tracking.get_single_cells(self.df)
             # self.df = tracking.remove_close_cells(self.df)
@@ -665,18 +670,34 @@ class Track:
         
         return
 
-    def get_clean_tracks(self, tres, df=None):
-
+    def get_clean_tracks(self, tres, df=None, max_interpolation=3, min_length=None):
+        
+        if min_length is None:
+            min_length=int(3600/tres)
+        
+        #Filtering the tracks
         if df is None:
             df = self.df
-        self.clean_df = tracking.get_clean_tracks(df)
-        self.clean_df = tracking.classify_tracks(self.clean_df, tres=tres)
+        self.clean_df = tracking.get_clean_tracks(df, max_interpolation, min_length, image_height=1024)
+        #self.clean_df = tracking.classify_tracks(self.clean_df, tres=tres)
         #clean_df_path = self.df_path.split('.')[0]+'clean.csv'
+        self.clean_df.to_csv(self.clean_df_path)
+
+    def classify_tracks(self, tres, coarsen=3, min_episode=1, sm=6, min_length=12, pixelperum=1.31, df=None):
+
+        if coarsen is None:
+            coarsen=int(3)
+        
+        if df is None:
+            df = self.df
+        
+        self.clean_df = tracking.classify_tracks(df, tres=tres, coarsen=coarsen, min_episode=min_episode, sm=sm, min_length=min_length, pixelperum=pixelperum)
+        
         self.clean_df.to_csv(self.clean_df_path)
 
 def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, manual=False, fovs=None, sql=False, lane_distance=30,
  lane_low_clip=0, lane_high_clip=2000, min_mass=2.65e5, max_travel=15, track_memory=15, diameter=15, min_frames=10, cyto_diameter=29, 
- flow_threshold=1.25, mask_threshold=0, pretrained_model='mdamb231', use_existing_parameters=False, bf_channel=None, nuc_channel=None, tres=120):
+ flow_threshold=1.25, mask_threshold=0, pretrained_model='mdamb231', use_existing_parameters=False, bf_channel=None, nuc_channel=None, tres=120, run_cellpose=True, v_rel=0.5):
     
     args=locals()
     ##Save arguments to file
@@ -707,27 +728,12 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
         log_file.write("Logging for Experiment \n")
 
     
-    
-    """logger = logging.getLogger('pipeline')
-    logger.setLevel(logging.DEBUG)
-    # create file handler which logs even debug messages
-    fh = logging.FileHandler(log_filename)
-    fh.setLevel(logging.DEBUG)
-    # create console handler with a higher log level
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.ERROR)
-    # create formatter and add it to the handlers
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    ch.setFormatter(formatter)
-    fh.setFormatter(formatter)
-    # add the handlers to logger
-    logger.addHandler(ch)
-    logger.addHandler(fh)"""
-
     if fovs is None:
         f = ND2Reader(os.path.join(data_path, nd2_file))
-        fovs = range(f.sizes['t'])
-
+        fovs = np.arange(f.sizes['v'])
+    if frame_indices is None:
+        f = ND2Reader(os.path.join(data_path, nd2_file))
+        frame_indices = np.arange(f.sizes['t'])
 
     too_muchtravel=[]
     start_time = time.time()
@@ -748,7 +754,7 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
             if not os.path.isfile(path_out_fov+'lanes/lanes_mask.tif'):
                 try:
                     print('Detecting lanes')
-                    track.detect_lanes(lane_distance=lane_distance, low_clip=lane_low_clip, high_clip=lane_high_clip)
+                    track.detect_lanes(lane_distance=lane_distance, low_clip=lane_low_clip, high_clip=lane_high_clip, v_rel=v_rel)
                     print('Lane detection succesful')
                 except:
                     try:
@@ -763,23 +769,32 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
                 track.lanes_mask, track.lanes_metric = imread(path_out_fov+'lanes/lanes_mask.tif'), imread(path_out_fov+'lanes/lanes_metric.tif')
             # #Run Segmentation of the cytoplasm with Cellpose
             t_0 = time.time()
-            track.segment_2(cyto_bottom_percentile=0.0, cyto_top_percentile=100, nucleus_bottom_percentile=0, nucleus_top_percentile=100, flow_threshold=flow_threshold, mask_threshold=mask_threshold, pretrained_model=pretrained_model, cyto_diameter=cyto_diameter, verbose=False)
+            if run_cellpose:
+                track.segment_2(cyto_bottom_percentile=0.0, cyto_top_percentile=100, nucleus_bottom_percentile=0, nucleus_top_percentile=100, flow_threshold=flow_threshold, mask_threshold=mask_threshold, pretrained_model=pretrained_model, cyto_diameter=cyto_diameter, verbose=False)
+            
             t_1 = time.time() - t_0
             print(f'It took {t_1} seconds to run cellpose')
 
             #Now run the tracking
             try:
                 track.get_nucleus_tracks(max_travel=max_travel, diameter=diameter, minmass=min_mass, track_memory=track_memory)
-            except:
+            except SubnetOversizeException:
                 try:
-                    track.get_nucleus_tracks(max_travel=25, diameter=diameter, minmass=min_mass, track_memory=track_memory)
-                except:
+                    track.get_nucleus_tracks(max_travel=15, diameter=diameter, minmass=min_mass, track_memory=track_memory)
+                except SubnetOversizeException:
                     too_muchtravel.append(fov)
                     continue
             track.df = pd.read_csv(f'{path_out_fov}tracking_data.csv')
+            
+            cyto_file = glob.glob(os.path.join(path_out_fov, 'cyto_masks*'))
+            if len(cyto_file) == 0:
+                ## No masks available so no way of getting clean tracks
+                # ## In the future it should be possible to filter nuclei only at least for single cells according to a certain minimum distance between them.                  
+                continue
             track.get_locations()
 
             track.get_clean_tracks(tres=tres)
+            track.classify_tracks(tres=tres)
             
             #Now enter the data from the stored data into the tracks table in the database
             if not sql:
@@ -803,7 +818,7 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
             print(str(e))
             with open(log_filename, 'a') as log_file:
                 log_file.write(str(traceback.format_exc())+'\n')
-            continue
+            break
         
             
     print(f'It took {(time.time()-start_time)/3600} hours to run pipeline on {len(fovs)} fields of view.')

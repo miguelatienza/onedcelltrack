@@ -128,7 +128,9 @@ class LaneViewer:
         v_max = f.sizes['v']-1
         self.v = widgets.IntSlider(min=0,max=v_max, step=1, description="v", continuous_update=False)
 
-        self.clip = widgets.IntRangeSlider(min=0,max=int(2**16 -1), step=1, description="clip", value=[0,5000], continuous_update=True, width='200px')
+        self.clip = widgets.IntRangeSlider(min=0,max=int(5_000), step=1, description="clip", value=[0,5000], continuous_update=True, width='200px')
+        
+        self.threshold = widgets.FloatSlider(min=0,max=1, step=0.05, description="v", continuous_update=False, value=0.5)
         
         self.kernel_width=5
         
@@ -156,7 +158,7 @@ class LaneViewer:
         
         out = widgets.interactive_output(self.update, {'v': self.v, 'clip': self.clip})
 
-        box = widgets.VBox([out, widgets.VBox([self.v, self.clip, self.ld, self.button],  layout=widgets.Layout(width='400px'))])
+        box = widgets.VBox([out, widgets.VBox([self.v, self.clip, self.ld, self.threshold, self.button],  layout=widgets.Layout(width='400px'))])
 
         display(box)
         
@@ -205,15 +207,16 @@ class LaneViewer:
         lanes_clipped = np.clip(self.lanes[v], vmin, vmax, dtype=self.lanes.dtype)
         
         print('recomputing')
-        self.min_coordinates[v], self.max_coordinates[v] = lane_detection.get_lane_mask(lanes_clipped, kernel_width=self.kernel_width, line_distance=self.ld.value, debug=True, gpu=True)
+        self.min_coordinates[v], self.max_coordinates[v] = lane_detection.get_lane_mask(lanes_clipped, kernel_width=self.kernel_width, line_distance=self.ld.value, debug=True, gpu=True, threshold=self.threshold.value)
         print('updating')
         self.update(v, self.clip)
         
 class TpViewer:
     
-    def __init__(self, nd2file):
+    def __init__(self, nd2file, channel=0):
         
         self.link_dfs = {}
+        self.channel=channel
         
         self.f = ND2Reader(nd2file)
         self.nfov, self.nframes = self.f.sizes['v'], self.f.sizes['t']
@@ -233,13 +236,14 @@ class TpViewer:
         
         self.min_mass = widgets.FloatSlider(min=1e5, max=1e6, step=0.01e5, description="min_mass", value=2.65e5, continuous_update=True)
         
-        self.diameter = widgets.IntSlider(min=9,max=21, step=2, description="diameter", value=15, continuous_update=True)
+        self.diameter = widgets.IntSlider(min=9,max=35, step=2, description="diameter", value=15, continuous_update=True)
         
         self.min_frames = widgets.FloatSlider(min=0,max=50, step=1, value=10, description="min_frames", continuous_update=False)
         
         self.max_travel = widgets.IntSlider(min=3,max=50, step=1, value=15, description="max_travel", continuous_update=False)
         
-        self.track_memory = widgets.IntSlider(min=0,max=20, step=1, value=5, description="max_travel", continuous_update=False)
+        self.track_memory = widgets.IntSlider(min=0,max=20, step=1, value=5, description="track memory", continuous_update=False)
+
 
         self.tp_method = widgets.Button(
         description='Track',
@@ -268,7 +272,7 @@ class TpViewer:
         #Organize layout and display
         out = widgets.interactive_output(self.update, {'t': self.t, 'c': self.c, 'v': self.v, 'clip': self.clip, 'min_mass': self.min_mass, 'diameter': self.diameter, 'min_frames': self.min_frames, 'max_travel': self.max_travel})
         
-        box = widgets.VBox([self.t, self.c, self.v, self.clip, self.min_mass, self.diameter, self.min_frames, self.max_travel, self.tp_method]) #, layout=widgets.Layout(width='400px'))
+        box = widgets.VBox([self.t, self.c, self.v, self.clip, self.min_mass, self.diameter, self.min_frames, self.max_travel, self.track_memory, self.tp_method]) #, layout=widgets.Layout(width='400px'))
         box1 = widgets.VBox([out, box])
         grid = widgets.widgets.GridspecLayout(3, 3)
         
@@ -309,7 +313,7 @@ class TpViewer:
         scat.set_offsets(data)
     
     def batch_update(self, v, t, min_mass, diameter):
-        nuclei = self.f.get_frame_2D(v=v, t=t, c=0)
+        nuclei = self.f.get_frame_2D(v=v, t=t, c=self.channel)
         nuclei = functions.preprocess(nuclei, bottom_percentile=0.05, top_percentile=99.95, log=True, return_type='uint16')
         
         self.batch_df = tp.locate(nuclei, diameter=diameter, minmass=min_mass)
@@ -321,7 +325,7 @@ class TpViewer:
         if False:#(v in self.link_dfs.keys()):
             self.link_df = self.link_dfs[v]
         else:
-            nuclei = np.array([self.f.get_frame_2D(v=v, t=t, c=0) for t in range(self.f.sizes['t'])])
+            nuclei = np.array([self.f.get_frame_2D(v=v, t=t, c=self.channel) for t in range(self.f.sizes['t'])])
             nuclei = functions.preprocess(nuclei, bottom_percentile=0.05, top_percentile=99.95, log=True, return_type='uint16')
             dft = tp.batch(nuclei, diameter=diameter, minmass=min_mass)
             dftp = tp.link(dft, max_travel, memory=track_memory)
@@ -334,7 +338,7 @@ class TpViewer:
 
 class CellposeViewer:
     
-    def __init__(self, nd2file, bf_channel=None, nuc_channel=None):
+    def __init__(self, nd2file, bf_channel=None, nuc_channel=None,pretrained_model='mdamb231', omni=False):
         
         self.link_dfs = {}
         
@@ -342,15 +346,16 @@ class CellposeViewer:
         self.nfov, self.nframes = self.f.sizes['v'], self.f.sizes['t']
         
         channels = self.f.metadata['channels']
-
+    
         if bf_channel is None or nuc_channel is None:
                     ###Infer the channels
-            if 'erry' in channels[0] or 'exas' in channels[0]:
+            if 'erry' in channels[0] or 'exas' in channels[0] and not 'phc' in channels[0]:
                 self.nucleus_channel=0
                 self.cyto_channel=1
-            elif 'erry' in channels[1] or 'exas' in channels[1]:
+            elif 'erry' in channels[1] or 'exas' in channels[1] and not 'phc' in channels[1]:
                 self.nucleus_channel=1
                 self.cyto_channel=0
+                
             else:
                 raise ValueError(f"""The channels could not be automatically detected! \n
                 The following channels are available: {channels} . Please specify the indices of bf_channel and nuc_channel as keyword arguments. i.e: bf_channel=0, nuc_channel=1""")
@@ -372,7 +377,7 @@ class CellposeViewer:
         
         self.flow_threshold = widgets.FloatSlider(min=0, max=1.5, step=0.05, description="flow_threshold", value=1.25, continuous_update=False)
         
-        self.diameter = widgets.IntSlider(min=15,max=100, step=2, description="diameter", value=29, continuous_update=False)
+        self.diameter = widgets.IntSlider(min=0,max=1000, step=2, description="diameter", value=29, continuous_update=False)
         
         self.mask_threshold = widgets.FloatSlider(min=-3,max=3, step=0.1, value=0, description="mask_threshold", continuous_update=False)
         
@@ -411,7 +416,7 @@ class CellposeViewer:
         #self.fig.canvas.footer_visible = False
         self.im = self.ax.imshow(image)
 
-        self.init_cellpose()
+        self.init_cellpose(pretrained_model=pretrained_model, omni=omni)
                 
         #Organize layout and display
         out = widgets.interactive_output(self.update, {'t': self.t, 'v': self.v, 'cclip': self.cclip, 'nclip': self.nclip, 'flow_threshold': self.flow_threshold, 'diameter': self.diameter, 'mask_threshold': self.mask_threshold, 'max_travel': self.max_travel})
@@ -428,8 +433,16 @@ class CellposeViewer:
         display(grid)
         plt.ion()
     
-    def init_cellpose(self, pretrained_model='mdamb231', model='cyto', gpu=True):
-        if pretrained_model is None:
+    def init_cellpose(self, pretrained_model='mdamb231', omni=False, model='cyto', gpu=True):
+ 
+        if omni:
+            from cellpose_omni.models import CellposeModel
+            self.model = CellposeModel(
+            gpu=gpu, omni=True, nclasses=4, nchan=2, pretrained_model=pretrained_model)
+            return
+
+        
+        elif pretrained_model is None:
             self.model = models.Cellpose(gpu=gpu, model_type='cyto')
 
         else:
@@ -441,12 +454,16 @@ class CellposeViewer:
                 if os.path.isfile(path_to_model):
                     pretrained_model = path_to_model
                 else: 
+         
                     url = dic[pretrained_model]['link']
                     print('Downloading model from Nextcloud...')
                     request.urlretrieve(url, os.path.join(path_to_models, path_to_model))
                     pretrained_model = os.path.join(path_to_models,dic[pretrained_model]['path'])
 
-            self.model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model)
+            
+            if not omni:
+                
+                self.model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model)
 
     def update(self, t, v, cclip, nclip, flow_threshold, diameter, mask_threshold, max_travel):      
         
@@ -487,11 +504,13 @@ class CellposeViewer:
         #cyto = functions.preprocess(cyto, bottom_percentile=vmin, top_percentile=vmax, return_type='uint16')
        
         nucleus = self.f.get_frame_2D(v=v, t=t, c=self.nucleus_channel)
-        nucleus = functions.preprocess(nucleus, bottom_percentile=0, top_percentile=100, log=True, return_type='uint16')
+        #nucleus = functions.preprocess(nucleus, bottom_percentile=0, #top_percentile=100, log=True, return_type='uint16')
         cyto = self.f.get_frame_2D(v=v, t=t, c=self.cyto_channel)
         
+    
         image = np.stack((cyto, nucleus), axis=1)
-        
+        if diameter == 0:
+            diameter=None
         mask = self.model.eval(
             image, diameter=diameter, channels=[1,2], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=normalize, progress=verbose)[0].astype('uint8')
         
@@ -723,7 +742,6 @@ class ResultsViewer:
         cyto = self.f.get_frame_2D(v=self.v.value,c=self.c.value,t=self.t.value)
         cyto = np.clip(cyto, vmin, vmax).astype('float32')
         cyto = (255*(cyto-vmin)/(vmax-vmin)).astype('uint8')
-
         image = np.stack((cyto, cyto, cyto), axis=-1)
         image[:,:,0]= np.clip((self.lanes*10).astype('uint16')+image[:,:,0].astype('uint16'), 0, 255).astype('uint8')
         
@@ -880,6 +898,7 @@ class ResultsViewer:
 
             self.ax2.add_collection(collection)
 
+        if 'state' in self.dfp.columns:
             #self.dfp, cp_indices, valid_boundaries, segments = cp.classify_movement(self.dfp)
 
             MO_bool =self.dfp.state=='MO'

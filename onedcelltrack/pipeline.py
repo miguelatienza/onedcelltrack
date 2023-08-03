@@ -759,7 +759,7 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
                 except:
                     try:
                         print('Detecting lanes with higer high clip value')
-                        track.detect_lanes(lane_distance=lane_distance, low_clip=0, high_clip=5000)
+                        track.detect_lanes(lane_distance=lane_distance, low_clip=0, high_clip=5000, v_rel=v_rel)
                         print('Lane detection succesful')
                     except:
                         print('Warning! The lane detection failed for field of view {fov}. Skipping to the next field of view.')

@@ -130,7 +130,7 @@ class LaneViewer:
 
         self.clip = widgets.IntRangeSlider(min=0,max=int(5_000), step=1, description="clip", value=[0,5000], continuous_update=True, width='200px')
         
-        self.threshold = widgets.FloatSlider(min=0,max=1, step=0.05, description="threshold", continuous_update=False, value=0.5)
+        self.threshold = widgets.FloatSlider(min=0,max=1, step=0.05, description="threshold", continuous_update=False, value=0.3)
         
         self.kernel_width=5
         

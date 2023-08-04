@@ -134,8 +134,6 @@ def run_pipeline(param_dict):
     with open(path_out + 'pipeline_arguments.json', 'w') as fp:
         json.dump(param_dict, fp)
     
-
-
     ## Lane detection
 
 

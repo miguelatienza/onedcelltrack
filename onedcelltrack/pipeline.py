@@ -30,15 +30,15 @@ class Track:
 
         Parameters
         ----------
+        path_out : string
+            Path to write all generated data.
         data_path : string
             Path were data is read. Regular path file or dataset id if from omero
         cyto_file : string
             File containing cyto image. Either tif, nd2 or omero image id.
         nucleus_file : string
             File containing nucleus image.  Either tif, nd2 or omero image id.
-        path_out : TYPE
-            Path to write all generated data.
-        image_indices : list, optional
+        frame_indices : list, optional
             Indices of image to be  read  as list [first  index, last index]. The default is None.
         max_memory : TYPE, optional
             The maximum memory that should be used during computations. At the moment just uses the  maximum stack. The default is None.
@@ -692,6 +692,38 @@ class Track:
         self.clean_df = tracking.classify_tracks(df, tres=tres, coarsen=coarsen, min_episode=min_episode, sm=sm, min_length=min_length, pixelperum=pixelperum)
         
         self.clean_df.to_csv(self.clean_df_path)
+    
+    def check_files(data_path, image_file, lanes_file):
+        """
+        Checks if the files are present in the data_path and if they are of the right type. Accepted types are .nd2 and .tif.
+
+        Parameters
+        ----------
+        data_path : str
+            Path to the data folder.
+        image_file : str
+            Name of the image file.
+        lanes_file : str
+            Name of the lanes file.
+        """
+        if not os.path.isfile(os.path.join(data_path, image_file)):
+            raise FileNotFoundError(f'Could not find {image_file} in {data_path}')
+        if not os.path.isfile(os.path.join(data_path, lanes_file)):
+            raise FileNotFoundError(f'Could not find {lanes_file} in {data_path}')
+        if not image_file.endswith('.nd2') and not image_file.endswith('.tif'):
+            raise ValueError(f'{image_file} is not a .nd2 or .tif file')
+        if not lanes_file.endswith('.nd2') and not lanes_file.endswith('.tif'):
+            raise ValueError(f'{lanes_file} is not a .nd2 or .tif file')
+        if image_file.endswith('.tif'):
+            assert imread(os.path.join(data_path, image_file)).ndim==4, f'{image_file} is not a 2D image stack with 2 channels'
+            assert imread(os.path.join(data_path, image_file)).shape[-1]==2, 'The tif stack should be of the shape (n_frames, height, width, channels) with 2 channels'
+        else:
+            print('All files are present and of the right type')
+            if image_file.endswith('.nd2'):
+                f = ND2Reader(os.path.join(data_path, image_file))
+                assert f.sizes['c']==2, 'The nd2 file should have 2 channels'
+                assert f.sizes['v']==1, 'The nd2 file should have 1 field of view'
+        return
 
 def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, manual=False, fovs=None, sql=False, lane_distance=30,
  lane_low_clip=0, lane_high_clip=2000, min_mass=2.65e5, max_travel=15, track_memory=15, diameter=15, min_frames=10, cyto_diameter=29, 
@@ -725,7 +757,6 @@ def run_pipeline(data_path, nd2_file, lanes_file, path_out, frame_indices=None, 
     with open(log_filename, 'w') as log_file:
         log_file.write("Logging for Experiment \n")
 
-    
     if fovs is None:
         f = ND2Reader(os.path.join(data_path, nd2_file))
         fovs = np.arange(f.sizes['v'])

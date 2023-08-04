@@ -130,7 +130,7 @@ class LaneViewer:
 
         self.clip = widgets.IntRangeSlider(min=0,max=int(5_000), step=1, description="clip", value=[0,5000], continuous_update=True, width='200px')
         
-        self.threshold = widgets.FloatSlider(min=0,max=1, step=0.05, description="threshold", continuous_update=False, value=0.5)
+        self.threshold = widgets.FloatSlider(min=0,max=1, step=0.05, description="threshold", continuous_update=False, value=0.3)
         
         self.kernel_width=5
         
@@ -462,7 +462,6 @@ class CellposeViewer:
 
             
             if not omni:
-                
                 self.model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model)
 
     def update(self, t, v, cclip, nclip, flow_threshold, diameter, mask_threshold, max_travel):      
@@ -508,11 +507,13 @@ class CellposeViewer:
         cyto = self.f.get_frame_2D(v=v, t=t, c=self.cyto_channel)
         
     
-        image = np.stack((cyto, nucleus), axis=1)
+        image = np.stack((cyto, nucleus), axis=-1)
+        print(image.shape)
+        print('hjflks1')
         if diameter == 0:
             diameter=None
         mask = self.model.eval(
-            image, diameter=diameter, channels=[1,2], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=normalize, progress=verbose)[0].astype('uint8')
+            image, diameter=diameter, channels=[1, 0], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=normalize, progress=verbose)[0].astype('uint8')
         
         bin_mask = np.zeros(mask.shape, dtype='bool')
         cell_ids = np.unique(mask)

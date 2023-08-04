@@ -5,10 +5,8 @@ import logging
 import traceback
 import pickle
 from tqdm import tqdm
-#sys.path.append('..')
 from . import functions
 from .segmentation import segment, segment_looped
-#from .omerop import Omero
 import numpy as np
 from tifffile import TiffFile, imwrite, imread
 import os
@@ -28,7 +26,7 @@ class Track:
     
     def __init__(self, path_out, data_path=None, cyto_file=None, nucleus_file=None, nd2_file=None, lanes_file=None, frame_indices=None, max_memory=None, dataset_id=None, image_id=None, ome_host='omero.physik.uni-muenchen.de', ome_user_name=None, ome_password=None, fov=None, bf_channel=None, nuc_channel=None):
         """
-        A class to run full tracking part of the pipeline on one field of view. The class should contain the methods for the cytoplasm segmentation, nucleus tracking, and the rearranging of the nuclei with the cytoplasm contours. The final output should be a set of 3darrays (frame_number, nuclear_position, front, rear) each for one particle.
+        A class to run full tracking part of the pipeline on one field of view. The class contains the methods for the cytoplasm segmentation, nucleus tracking, and the rearranging of the nuclei with the cytoplasm contours. The final output should be a set of 3darrays (frame_number, nuclear_position, front, rear) each for one particle.
 
         Parameters
         ----------

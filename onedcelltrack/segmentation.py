@@ -72,7 +72,7 @@ def segment_looped(cytoplasm, nucleus, gpu=True, model_type='cyto', channels=[1,
     masks = np.zeros(cytoplasm.shape, 'uint8')
 
     for frame in tqdm(range(masks.shape[0])):
-        mask = model.eval(images[frame], diameter=diameter, channels=[1,2], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=True)[0]
+        mask = model.eval(images[frame], diameter=diameter, channels=[1,0], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=True)[0]
         masks[frame] =  mask.astype('uint8')
 
     return masks

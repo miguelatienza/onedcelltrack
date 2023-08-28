@@ -512,7 +512,7 @@ class CellposeViewer:
         if diameter == 0:
             diameter=None
         mask = self.model.eval(
-            image, diameter=diameter, channels=[1,2], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=normalize, progress=verbose)[0].astype('uint8')
+            image, diameter=diameter, channels=[1,0], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=normalize, progress=verbose)[0].astype('uint8')
         
         bin_mask = np.zeros(mask.shape, dtype='bool')
         cell_ids = np.unique(mask)

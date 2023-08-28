@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from skimage.segmentation import find_boundaries
-from .. import functions
+#from .. import functions
 DEBUG=False
 
 def S(x, axis=0):

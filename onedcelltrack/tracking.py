@@ -18,7 +18,7 @@ from .classify import tools
 from .classify import cp
 pd.options.mode.chained_assignment = None
 
-def track(nuclei, diameter=19, minmass=None, track_memory=15, max_travel=5, min_frames=10, pixel_to_um=1, verbose=False):
+def track_nuclei(nuclei, diameter=15, minmass=2.6e5, track_memory=15, max_travel=15, min_frames=10, pixel_to_um=1.3, verbose=False):
     """
     Detect the nuclei positions from fluoresecence images and link them to create individual particle tracks using trackpy.
 
@@ -26,14 +26,14 @@ def track(nuclei, diameter=19, minmass=None, track_memory=15, max_travel=5, min_
     ----------
     nuclei : numpy 3D array
         Images of fluorescent nuclei as numpy array.
-    diameter : TYPE, optional
+    diameter : int, optional
         Estimate of nuclei diameters, better to overestime than  underestimate. The default is 19.
-    minmass : TYPE, optional
+    minmass : int, optional
         Minimum mass of a point to be considered valid nucleus. The default is 3500.
-    track_memory : TYPE, optional
+    track_memory : int, optional
         Maximum number of time frames where nucleus position is interpolated if it is not detected. The default is 15.
-    max_travel : TYPE, optional
-        Maximum . The default is 5.
+    max_travel : int, optional
+        Maximum distance between nuclei in subsequent frames. The default is 5.
     min_frames : TYPE, optional
         DESCRIPTION. The default is 10.
 
@@ -65,6 +65,11 @@ def track(nuclei, diameter=19, minmass=None, track_memory=15, max_travel=5, min_
     
     return t
 
+def locate_nuclei(**kwargs):
+    return tp.locate(**kwargs)
+
+def track_batch():
+    return tp.batch
 
 def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns, tres=30, min_duration=None):
     

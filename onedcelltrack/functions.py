@@ -6,6 +6,7 @@ General functions used for all parts of the code.
 """
 import os
 from tkinter import Y
+from typing import Iterable
 import numpy as np
 import sys
 from numba import njit, prange
@@ -1084,15 +1085,19 @@ def read_nd2(file, v, frames=None, c=None):
     from nd2reader import ND2Reader
     #print('Reading nd2')
     f = ND2Reader(file)
-    
     if frames is None:
+        frames=0
+    
+    if not isinstance(frames, Iterable):
+        frames = int(frames)
         if c is None:
-            x = f.get_frame_2D(v=v)
+            x = f.get_frame_2D(v=v, t=frames)
             return x
         else:
-            x = f.get_frame_2D(v=v, c=c)
+            x = f.get_frame_2D(v=v, c=c, t=frames)
             return x
-
+    else:
+        frames = np.array(frames)
     x = np.zeros((
         frames.size, f.sizes['y'], f.sizes['x']), dtype='uint16')
 

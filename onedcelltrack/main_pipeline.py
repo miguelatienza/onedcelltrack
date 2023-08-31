@@ -695,9 +695,6 @@ class Pipeline:
 
             print(f'Done with fov {fov}!')
             self.logger.info(f'Done! with fov {fov}!')
-            
+        print('Done with all fovs!')
+        self.logger.info('Done with all fovs!')
         return
-
-
-
-

@@ -34,6 +34,14 @@
   "mask_threshold": 0,
   "cellprob_threshold": 0,
   "pretrained_model": "phcmarch23",
+  "savenumpy_masks": true,
+  "omni": false,
+
+  "min_duration": null,
+  "max_interpolation": 5,
+  "min_track_length": 6,
+  "min_velocity": 0.002,
+  "min_o": 5,
   
   "run_cellpose": true,
   "nd2_cell_files": false,
@@ -42,5 +50,6 @@
   "nd2_lanes_file": false,
   "single_tif_lanes_file": false,
   "sql": false,
-  "use_gpu": true
+  "use_gpu": true,
+  "verbose": true
 }

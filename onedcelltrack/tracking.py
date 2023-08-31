@@ -5,6 +5,7 @@ Created on Sun Dec 12 11:02:33 2021
 @author: miguel.Atienza
 """
 
+import warnings
 import numpy as np
 import sys
 from . import functions
@@ -17,8 +18,10 @@ import pandas as pd
 from .classify import tools
 from .classify import cp
 pd.options.mode.chained_assignment = None
-
-def track_nuclei(nuclei, diameter=15, minmass=2.6e5, track_memory=15, max_travel=15, min_frames=10, pixel_to_um=1.3, verbose=False):
+warnings.filterwarnings("ignore", message="No maxima survived mass- and size-based filtering.*")
+warnings.filterwarnings("ignore", message="No maxima found in any frame.*")
+   
+def track_nuclei(nuclei, diameter=15, minmass=2.6e5, track_memory=15, max_travel=15, min_frames=10, pixel_to_um=1.3, verbose=False, logger=None):
     """
     Detect the nuclei positions from fluoresecence images and link them to create individual particle tracks using trackpy.
 
@@ -59,6 +62,11 @@ def track_nuclei(nuclei, diameter=15, minmass=2.6e5, track_memory=15, max_travel
     print('Tracking nuclei using trackpy...')
     #print(diameter, minmass, track_memory, max_travel)
     f = tp.batch(nuclei, diameter=diameter, minmass=minmass)
+    if len(f)==0:
+        print('WARNING! No nuclei detected. Check that the minmass parameter is not too high.')
+        if logger:
+            logger.warning('No nuclei detected. Check that the minmass parameter is not too high.')
+        return f
     t = tp.link(f, max_travel, memory=track_memory)
     t = tp.filter_stubs(t, min_frames)
     print('Tracking of nuclei completed.')
@@ -71,7 +79,32 @@ def locate_nuclei(**kwargs):
 def track_batch():
     return tp.batch
 
-def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns, tres=30, min_duration=None):
+def merge_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns, tres=30, min_duration=None, verbose=False, logger=None):
+    """
+    Merge tracking data with cytoplasmic masks and lane information.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame containing tracking data.
+    cyto_masks : numpy.ndarray
+        Array of cytoplasmic masks.
+    lanes_mask : numpy.ndarray
+        Array of lane masks.
+    lanes_metric : numpy.ndarray
+        Array of lane metrics.
+    patterns : numpy.ndarray
+        Array of patterns.
+    tres : int, optional
+        Time resolution of the data in seconds. Default is 30.
+    min_duration : int, optional
+        Minimum duration of a track in frames. Default is None.
+
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame containing merged tracking data.
+    """
     
     if min_duration is None:
         ##Set this to an hour
@@ -103,12 +136,12 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns, tres=3
 
         return
 
-    footprint_array = functions.get_foot_print(cyto_masks)
+    footprint_array = functions.get_foot_print(cyto_masks, verbose=False)##verbose is unnecessary here
     uniques = df.particle.unique()
     ids = np.arange(uniques.size)
 
     print('Obtaininig cell tracks...')
-    for i in tqdm(ids):
+    for i in tqdm(ids, disable=(not verbose)):
 
         particle = uniques[i]
         #print(f'particle: {particle}')
@@ -166,7 +199,10 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns, tres=3
         lane_area = np.sum(binary_cyto_mask*lanes_mask[np.newaxis, :, :], axis=(1,2))
 
         #Calculate FN signal only on the region that is on a lane
-        FN_signal = np.sum(patterns[np.newaxis, :,:]*binary_cyto_mask*lanes_mask, axis=(1,2))/lane_area
+        #print(lane_area, 'lane_area')
+        lane_area_with_nan = lane_area.copy().astype('float32')
+        lane_area_with_nan[lane_area==0]=np.nan
+        FN_signal = np.sum(patterns[np.newaxis, :,:]*binary_cyto_mask*lanes_mask, axis=(1,2))/lane_area_with_nan
 
         ##Interpolate values and cut out at beginning and end if necessary
         island_boundaries = np.argwhere(find_boundaries(lonely_nuclei, mode='outer', background=0)).astype(int).flatten() #Boundaries of islands of lonely nuclei
@@ -262,7 +298,9 @@ def get_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns, tres=3
     return df
 
 def get_cyto_positions(lanes_mask, lanes_metric, binary_cyto_mask, lonely_nuclei, min_overlap=0.5):
-
+    """
+    
+    """
     two_lanes = False
     n_frames = binary_cyto_mask.shape[0]
     img_size = int(binary_cyto_mask.shape[1]*binary_cyto_mask.shape[2])
@@ -381,7 +419,27 @@ def remove_close_cells(df, min_distance=10):
     return df
 
 def get_clean_tracks(df, max_interpolation=5, min_length=6, image_height=1024):
-    
+    """
+    Clean the tracks and calculate velocities and lengths.
+    Makes sure that no cell is too close to another cell, and that no cell is touching more than one lane.
+    Also makes sure that no cells are touching the borders of the image.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame containing tracking data.
+    max_interpolation : int, optional
+        Maximum time between frames for interpolation. Default is 5.
+    min_length : int, optional
+        Minimum length of a track in frames. Default is 6.
+    image_height : int, optional
+        Height of the image in pixels. Default is 1024.
+
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame containing cleaned tracking data with velocities and lengths.
+    """
     ##filtering and segmenting
     clean_df = get_single_cells(df)
     clean_df = remove_close_cells(clean_df)
@@ -397,7 +455,7 @@ def get_clean_tracks(df, max_interpolation=5, min_length=6, image_height=1024):
     for particle in ids:
 
         dfp = clean_df.loc[clean_df.particle==particle, :]
-        invalid = ~((dfp.valid==1) & (dfp.too_close==0) & (dfp.single_nucleus==1) & (dfp.front!=0) & (dfp.rear!=0) & (dfp.nucleus!=0) & (dfp.front<image_height)).values
+        invalid = ~((dfp.valid==1) & (dfp.too_close==0) & (dfp.single_nucleus==1) & (dfp.front!=0) & (dfp.rear!=0) & (dfp.nucleus!=0) & (dfp.front<=image_height)).values
         
         dfp = tools.segment_dfp(dfp, invalid, min_length=min_length)
 
@@ -438,8 +496,36 @@ def get_clean_tracks(df, max_interpolation=5, min_length=6, image_height=1024):
 
     return clean_df
 
-def classify_tracks(df, tres, coarsen=3, min_episode=1, sm=6, min_length=12, pixelperum=1.31):
-    
+def classify_tracks(df, tres, coarsen=3, min_episode=1, sm=6, min_length=12, pixelperum=1.31, min_velocity=0.002, min_o=5):
+    """
+    Classify the tracks as moving or not moving And oscillatory or spread according to Amiri et al 2020.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame containing tracking data.
+    tres : int
+        Time resolution of the data in seconds.
+    coarsen : int, optional
+        Coarsening factor for the data. Default is 3.
+    min_episode : int, optional
+        Minimum number of frames for a movement episode. Default is 1.
+    sm : int, optional
+        Number of frames for smoothing. Default is 6.
+    min_length : int, optional
+        Minimum length of a track in frames. Default is 12.
+    pixelperum : float, optional
+        Conversion factor from pixels to microns. Default is 1.31.
+    min_velocity : float, optional
+        Minimum velocity for a movement episode. Default is 0.002.
+    min_o : int, optional
+        Minimum oscillation metric to be considered oscillatory. Default is 5.
+
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame containing tracking data with classification.
+    """
     df['motion']=''
     df['state']=''
     df['V']=np.nan
@@ -453,6 +539,6 @@ def classify_tracks(df, tres, coarsen=3, min_episode=1, sm=6, min_length=12, pix
            
             where = (df.particle==particle) & (df.segment==segment)
      
-            df[where], _ = cp.classify_movement(df[where], fps=1/tres, v_min=0.002, min_length=min_length, pixelperum=pixelperum, coarsen=coarsen, Nperm=1000, Lth=0.98, Oth=5, min_episode=min_episode, sm=sm)
+            df[where], _ = cp.classify_movement(df[where], fps=1/tres, v_min=min_velocity, min_length=min_length, pixelperum=pixelperum, coarsen=coarsen, Nperm=1000, Lth=0.98, Oth=min_o, min_episode=min_episode, sm=sm)
 
     return df

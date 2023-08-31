@@ -1043,12 +1043,12 @@ def get_lane_mask(image, delta_y_max=20, kernel_width=5, line_distance=30, thres
 
     return lane_mask, lane_metric
 
-def get_foot_print(masks, out=None, crf=0, rate=10, write=False):
-    print('Getting footprint...')
-    from skvideo.io import FFmpegWriter
+def get_foot_print(masks, out=None, crf=0, rate=10, write=False, verbose=False):
+    #print('Getting footprint...')
 
     masks = masks>0
     if write:
+        from skvideo.io import FFmpegWriter
         if out is None:
             raise ValueError('An output path is needed if write=True is passed!')
 
@@ -1073,7 +1073,7 @@ def get_foot_print(masks, out=None, crf=0, rate=10, write=False):
     
     else:
         footprint = np.zeros(masks.shape, dtype='uint16')
-        for i in tqdm(range(1, masks.shape[0])):
+        for i in tqdm(range(1, masks.shape[0]), disable=not verbose):
 
             footprint[i] = footprint[i-1] + masks[i-1]
         

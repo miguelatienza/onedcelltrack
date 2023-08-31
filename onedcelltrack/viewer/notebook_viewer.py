@@ -29,39 +29,46 @@ import matplotlib.colors as mcolors
 
 class Viewer(Pipeline):
     """
-    This is a general class is to view the images and then chose the bf_channel, nuc_channel and specify the fovs of interest as well as the corresponding fovs corresponding to the lanes_file. Note that if you do not specify the fovs and the lane_fovs, they must have the same length. the viewer contains a button to delete the current fov. The viewer also contains a button to exchange bf_channel and nucleus_channel. The viewer also contains a button to save the fovs and lane_fovs as well as bf_channel and nuc_channel to the param_dict.
+    This is a general class is to view the images and then chose the bf_channel, nuc_channel and specify the fovs of interest as well as the corresponding fovs corresponding to the lanes_file. Note that if you do not specify the fovs and the fovs_lanes, they must have the same length. the viewer contains a button to delete the current fov. The viewer also contains a button to exchange bf_channel and nucleus_channel. The viewer also contains a button to save the fovs and fovs_lanes as well as bf_channel and nuc_channel to the param_dict.
 
     Parameters
     ----------
     pipeline : Pipeline
         Instance of the pipeline class.
     """
-    def __init__(self, pipeline, fovs=None, lane_fovs=None, frame_indices=None):
+    def __init__(self, pipeline, fovs=None, fovs_lanes=None, frame_indices=None):
         self.__dict__.update(pipeline.__dict__)
+        
         self.pipeline = pipeline
-        if fovs is None:
-            fovs = list(range(self.n_fovs))
-        if lane_fovs is None:
-            lane_fovs = list(range(self.n_fovs_lanes))
-        if fovs is None and lane_fovs is None:
-            assert len(fovs)==len(lane_fovs), "The length of the fovs was inferred automatically but they are not of the same length. Please specify the fovs and lane_fovs as lists of the same length."
-        else:
-            assert len(fovs)==len(lane_fovs), "The length of the fovs and lane_fovs must be the same."
-        if frame_indices is None:
-            self.frame_indices = self.infer_frame_indices()
-        else:
-            self.frame_indices = frame_indices
-        self.n_frames = len(self.frame_indices)
-        self.fovs = fovs
-        self.lane_fovs = lane_fovs
-        self.n_fovs = len(fovs)
-        self.n_fovs_lanes = len(lane_fovs)
+        # if (fovs is None) and (self.fovs is None):
+        #     print('here')
+        #     fovs = list(range(self.n_fovs))
+        #     self.fovs=fovs
+        #     self.n_fovs=len(fovs)
+        # if (fovs_lanes is None) and (self.fovs_lanes) is None:
+        #     fovs_lanes = list(range(self.n_fovs_lanes))
+        #     self.fovs_lanes=fovs_lanes
+        #     self.n_fovs_lanes=len(fovs_lanes)
+
+        # if (fovs is not None) and (fovs_lanes is not None):
+        #     assert len(fovs)==len(fovs_lanes), "The length of the fovs was inferred automatically but they are not of the same length. Please specify the fovs and fovs_lanes as lists of the same length."
+        # elif (fovs is not None) and (fovs_lanes is None):
+        #     assert len(fovs)==len(fovs_lanes), "The length of the fovs and fovs_lanes must be the same."
+        # if (frame_indices is None) and (self.frame_indices is None):
+        #     self.frame_indices = self.infer_frame_indices()
+        #     self.n_frames = len(self.frame_indices)
+
+        # elif frame_indices is not None:
+        #     self.frame_indices = frame_indices
+        #     self.n_frames = len(self.frame_indices)
+        
         ## Initalise the channels
         if self.nuc_channel is None:
             self.nuc_channel = 1
             self.bf_channel = 0
-       
-        self.channel=0
+
+        # Set tchannel to brightfield
+        self.channel=self.bf_channel
 
         ## Initialise the buttons
 
@@ -122,7 +129,7 @@ class Viewer(Pipeline):
 
         ## Add an input box to specify the pixelperum ratio
         self.select_pixelperum = widgets.FloatText(
-        value=None,
+        value=self.pixelperum,
         description='Pixel per um:',
         disabled=False,
         )
@@ -163,10 +170,10 @@ class Viewer(Pipeline):
         ## Now create the sliders
         
         #slider for the contrast adjustment
-        self.clip = widgets.IntRangeSlider(min=0,max=int(2**16 -1), step=1, value=[0,1000], description="clip", continuous_update=True, width='200px')
+        self.clip = widgets.IntRangeSlider(min=0,max=int(2**16 -1), step=1, value=[0,50_000], description="clip", continuous_update=True, width='200px')
         #slider for the fovs and make them as wide as te image
-        self.fov = widgets.IntSlider(min=0,max=self.n_fovs-1, step=1, description="fov", continuous_update=False)
-        self.frame = widgets.IntSlider(min=0,max=self.n_frames-1, step=1, description="frame", continuous_update=False)
+        self.fov = widgets.IntSlider(min=min(self.fovs),max=max(self.fovs), step=1, description="fov", continuous_update=False)
+        self.frame = widgets.IntSlider(min=min(self.frame_indices),max=max(self.frame_indices), step=1, description="frame", continuous_update=False)
         
         ##Initialize the figure
         plt.ioff()
@@ -226,23 +233,29 @@ class Viewer(Pipeline):
         return lanes_image
 
     def update(self, fov, clip, frame):
+
+        self.n_fovs = len(self.fovs)
+        self.n_fovs_lanes = len(self.fovs_lanes)
+        self.n_frames = len(self.frame_indices)
+
         if fov not in self.fovs or not frame in self.frame_indices:
             self.position_status.button_style='danger'
-            self.position_status.description='Deleted'
+            self.position_status.description='Deleted position'
             self.fig.canvas.draw()
             return
         else:
             self.position_status.button_style='success'
-            self.position_status.description='Not deleted'
+            self.position_status.description='Not deleted position'
 
         vmin, vmax = self.clip.value
         cell_image = self.get_image_cell()
         lanes_image = self.get_image_lanes()
-   
+
         if self.channel==self.bf_channel:
             self.im_cell.set_cmap('gray')
         else:
             self.im_cell.set_cmap('Greens')
+
         self.im_cell.set_data(cell_image)
         self.im_cell.set_clim([vmin, vmax])
         self.im_lanes.set_data(lanes_image)
@@ -265,15 +278,15 @@ class Viewer(Pipeline):
 
     def delete_fov(self, a):
         """
-        Deletes the current fov from the fovs and lane_fovs lists.
+        Deletes the current fov from the fovs and fovs_lanes lists.
         """
+        print(self.fovs)
         if not self.fov.value in self.fovs:
             return
         self.fovs.remove(self.fov.value)
-        self.lane_fovs.remove(self.fov.value)
-        self.n_fovs-=1
-        self.n_fovs_lanes-=1
-        self.fov.max-=1
+        self.fovs_lanes.remove(self.fov.value)
+      
+        #self.fov.max-=1
         self.fov.value+=1
         self.update(self.fov.value, self.clip.value, self.frame.value)
     
@@ -281,8 +294,12 @@ class Viewer(Pipeline):
         """
         Save the fovs to the param_dict.
         """
+        ## Make the save button turn orange
+        self.button_save.button_style='warning'
+        ## add a message
+        self.button_save.description='Saving...'
         self.update_pipeline()
-        self.pipeline.save_parameters()
+        print('udpatin pipeline')
 
         if self.tres is None:
             ## Make the save button turn red
@@ -295,7 +312,9 @@ class Viewer(Pipeline):
             ## add a message
             print('Please specify the pixelperum ratio')
         else: #make the button green
+            self.pipeline.save_parameters()
             self.button_save.button_style='success'
+            self.button_save.description='Saved'
             return
 
     def exchange_channels(self, a):
@@ -361,9 +380,9 @@ class Viewer(Pipeline):
             if isinstance(self.__dict__[key], np.ndarray):
                 self.__dict__[key] = self.__dict__[key].tolist()
         param_dict = {key: value for key, value in self.__dict__.items() if key in self.param_keys}
-        #param_dict = self.pipeline.param_dict()
+        # set all attributes in param_dict to the pipeline
         self.pipeline.__dict__.update(param_dict)
-        self.pipeline.save_parameters()
+        # self.pipeline.__setattr__('param_dict', param_dict)
 
 class LaneViewer(Viewer):
     """
@@ -375,11 +394,11 @@ class LaneViewer(Viewer):
     """
 
     def __init__(self, pipeline):
-        self.__dict__.update(pipeline.__dict__)
     
+        self.__dict__.update(pipeline.__dict__)
         ## Initialise the Viewer class
         super().__init__(pipeline)
-        
+   
         ## Add new necessary sliders
         self.ld = widgets.IntSlider(min=10,max=60, step=1, description="lane distance", value=self.lane_distance, continuous_update=True)
         self.threshold = widgets.FloatSlider(min=0,max=1, step=0.05, description="threshold", continuous_update=False, value=self.lane_threshold)
@@ -409,6 +428,21 @@ class LaneViewer(Viewer):
         return lanes
     
     def update(self, fov, clip):
+
+        self.lane_distance=self.ld.value
+        self.lane_threshold=self.threshold.value
+        self.lane_low_clip=clip[0]
+        self.lane_high_clip=clip[1]
+        self.kernel_width=3
+
+        if fov not in self.fovs:
+            self.position_status.button_style='danger'
+            self.position_status.description='Deleted position'
+            self.fig.canvas.draw()
+            return
+        else:
+            self.position_status.button_style='success'
+            self.position_status.description='Not deleted position'
 
         vmin, vmax = clip
         image = self.lanes[fov]
@@ -440,10 +474,11 @@ class LaneViewer(Viewer):
         self.recompute_button.button_style='warning'
         try:
             vmin, vmax = self.clip.value
-            lanes_clipped = np.clip(self.lanes[self.fov.value], vmin, vmax, dtype=self.lanes[self.fov.value].dtype)
-
+            #lanes_clipped = np.clip(self.lanes[self.fov.value], vmin, vmax, dtype=self.lanes[self.fov.value].dtype)
+            lanes_image = self.get_image_lanes()
+            #lanes_clipped = np.clip(lanes_image, vmin, vmax, dtype=lanes_image.dtype)
             print('recomputing')
-            self.min_coordinates[self.fov.value], self.max_coordinates[self.fov.value] = lane_detection.get_lane_mask(lanes_clipped, kernel_width=self.kernel_width, line_distance=self.ld.value, debug=True, gpu=True, threshold=self.threshold.value)
+            self.min_coordinates[self.fov.value], self.max_coordinates[self.fov.value] = lane_detection.get_lane_mask(lanes_image, kernel_width=self.kernel_width, line_distance=self.ld.value, debug=True, gpu=True, threshold=self.threshold.value, low_clip=vmin, high_clip=vmax)
             print('updating')
             self.update(self.fov.value, self.clip.value)
             self.recompute_button.button_style='success'
@@ -465,6 +500,7 @@ class LaneViewer(Viewer):
         self.recompute(self.fov.value)
         self.update(self.fov.value, self.clip.value)
         display(self.window)
+    
 
 class TrackingViewer(Viewer):
     """
@@ -477,12 +513,12 @@ class TrackingViewer(Viewer):
     def __init__(self, pipeline):
         self.__dict__.update(pipeline.__dict__)
         super().__init__(pipeline)
-
+        self.pipeline = pipeline
         self.channel=self.nuc_channel
 
         ## Initialise the link_dfs
         self.link_dfs = {}
-        
+        self.clip.value=[0, 5_000]
         # 
         self.button_save.on_click(self.save)
         ## Create the buttons
@@ -494,15 +530,15 @@ class TrackingViewer(Viewer):
         icon='')
         self.button_track.on_click(self.track)
 
-        self.min_mass_slider = widgets.FloatSlider(min=1e4, max=1e6, step=0.01e5, description="min_mass", value=self.min_mass, continuous_update=True)
-       
+        self.min_mass_slider = widgets.FloatSlider(min=1e3, max=1e5, step=1e2, description="min_mass", value=self.min_mass, continuous_update=True)
+
         self.diameter_slider = widgets.IntSlider(min=9,max=35, step=2, description="diameter", value=self.diameter, continuous_update=True)
         
-        self.min_frames_slider = widgets.FloatSlider(min=0,max=50, step=1, value=self.min_frames, description="min_frames", continuous_update=False)
+        self.min_frames_slider = widgets.FloatSlider(min=0,max=50, step=1, value=self.min_frames, description="min_frames", continuous_update=True)
         
-        self.max_travel_slider = widgets.IntSlider(min=3,max=50, step=1, value=self.max_travel, description="max_travel", continuous_update=False)
+        self.max_travel_slider = widgets.IntSlider(min=3,max=50, step=1, value=self.max_travel, description="max_travel", continuous_update=True)
         
-        self.track_memory_slider = widgets.IntSlider(min=0,max=20, step=1, value=self.track_memory, description="track memory", continuous_update=False)
+        self.track_memory_slider = widgets.IntSlider(min=0,max=20, step=1, value=self.track_memory, description="track memory", continuous_update=True)
         
         self.track_button = widgets.Button(
         description='Track',
@@ -528,7 +564,7 @@ class TrackingViewer(Viewer):
         Arranges the widgets and displays them.
         """
         #self.update(self.fov.value, self.clip.value, self.frame.value)
-        out = widgets.interactive_output(self.update, {'fov': self.fov, 'clip': self.clip, 'frame': self.frame, 'min_mass': self.min_mass_slider, 'diameter': self.diameter_slider})
+        out = widgets.interactive_output(self.update, {'fov': self.fov, 'clip': self.clip, 'frame': self.frame, 'min_mass': self.min_mass_slider, 'diameter': self.diameter_slider, 'min_frames': self.min_frames_slider, 'max_travel': self.max_travel_slider, 'track_memory': self.track_memory_slider})
 
         # box for sliders for tracking
         tracking_sliders = widgets.VBox([self.min_mass_slider, self.diameter_slider, self.min_frames_slider, self.max_travel_slider, self.track_memory_slider, self.track_button, self.button_save, self.position_status])
@@ -541,7 +577,7 @@ class TrackingViewer(Viewer):
        
         #self.update(self.fov.value, self.clip.value, self.frame.value)
         display(self.window)
-        self.update(self.fov.value, self.clip.value, self.frame.value, self.min_mass_slider.value, self.diameter_slider.value)
+        self.update(self.fov.value, self.clip.value, self.frame.value, self.min_mass_slider.value, self.diameter_slider.value, self.min_frames_slider.value, self.max_travel_slider.value, self.track_memory_slider.value)
 
     def link_update(self, a):
         """
@@ -557,7 +593,7 @@ class TrackingViewer(Viewer):
         #update the button again
         self.track_button.button_style='success'
         self.track_button.description='Track'
-        self.update(self.fov.value, self.clip.value, self.frame.value, self.min_mass_slider.value, self.diameter_slider.value)
+        self.update(self.fov.value, self.clip.value, self.frame.value, self.min_mass_slider.value, self.diameter_slider.value, self.min_frames_slider.value, self.max_travel_slider.value, self.track_memory_slider.value)
 
     def batch_update(self, fov, t, min_mass, diameter):
         #set the track button to warning
@@ -567,8 +603,15 @@ class TrackingViewer(Viewer):
         self.track_button.button_style='success'
         return
 
-    def update(self, fov, clip, frame, min_mass, diameter):
+    def update(self, fov, clip, frame, min_mass, diameter, min_frames, max_travel, track_memory):
         
+        self.min_mass = min_mass
+        self.diameter = diameter
+        self.max_travel = max_travel
+        
+        self.track_memory = track_memory
+        self.min_frames = min_frames
+
         vmin, vmax = clip
         image = self.read_nuc(frames=frame, fov=fov)
         self.im_cell.set_data(image)
@@ -584,6 +627,9 @@ class TrackingViewer(Viewer):
             self.position_status.button_style='danger'
             self.position_status.description='Deleted position'
             return
+        else:
+            self.position_status.button_style='success'
+            self.position_status.description='Not deleted position'
 
         if fov in self.link_dfs.keys():
             df = self.link_dfs[fov]
@@ -595,24 +641,8 @@ class TrackingViewer(Viewer):
         # self.lscat.set_offsets(np.c_[[], []])
         self.bscat.set_offsets(self.batch_df[['x', 'y']].values)
         self.fig.canvas.draw()
-        
-    def save(self, a):
-       
-        ## Make the save button turn orange
-        self.button_save.button_style='warning'
-        ## add a message
-        self.button_save.description='Saving...'
-        ## Save the parameters
-        self.min_mass = self.min_mass_slider.value
-        self.diameter = self.diameter_slider.value
-        self.track_memory = self.track_memory_slider.value
-        self.max_travel = self.max_travel_slider.value
-        self.min_frames = self.min_frames_slider.value
 
-        self.update_pipeline()
-        ## Make the save button turn green
-        self.button_save.button_style='success'
-        self.button_save.description='Saved'
+        
 
 class CellposeViewer(Viewer):
     """
@@ -675,7 +705,9 @@ class CellposeViewer(Viewer):
             self.position_status.button_style='danger'
             self.position_status.description='Deleted position'
             return
-        
+        else:
+            self.position_status.button_style='success'
+            self.position_status.description='Not deleted position'
         # segment
         self.mask = self.cellpose.segment(bf, nucleus, diameter=diameter, flow_threshold=flow_threshold, cellprob_threshold=cellprob_threshold)
         

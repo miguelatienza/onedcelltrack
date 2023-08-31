@@ -1,3 +1,4 @@
+import datetime
 from tifffile import TiffFile, imwrite, imread
 import os
 from . import functions
@@ -10,6 +11,8 @@ import json
 from nd2reader import ND2Reader
 import glob
 import numpy as np
+import logging
+from tqdm import tqdm
 
 from IPython.display import display
 
@@ -81,7 +84,16 @@ class Pipeline:
         self.path_out = path_out
 
         self.infer_pixel_micron_ratio()
-        return self.param_dict()
+        self.frame_indices=self.infer_frame_indices()
+        self.n_frames = len(self.frame_indices)
+        self.fovs = self.infer_fovs()
+        self.n_fovs = len(self.fovs)
+        self.fovs_lanes = self.infer_fovs_lanes()
+        self.n_fovs_lanes = len(self.fovs_lanes)
+
+        assert self.n_fovs==self.n_fovs_lanes, 'The number of fovs in the lanes file is not equal to the number of fovs in the nd2 file. Please check if the files are correct. If it is, make sure to specify the fovs and lanes_fovs in the parameters.'
+
+        return self.get_param_dict()
 
     def check_files(self, data_path, lanes_file, path_out, image_file=None, bf_files=None, nuc_files=None):
         """
@@ -105,14 +117,14 @@ class Pipeline:
         lanes_file : str
             Name of the lanes file.  
         """
+        cell_images_checked=False
+
         ### Handle the cell images
         ## 1. case: nd2 file with all fovs, time_points and channels and an extra nd2 file for the lanes containing each fov
-        cell_images_checked=False
         if not isinstance(image_file, list):
             if image_file.endswith('.nd2'):
                 #make sure the file exists
                 assert os.path.isfile(os.path.join(data_path, image_file)), f'Could not find {image_file} in {data_path}'
-            
                 f = ND2Reader(os.path.join(data_path, image_file))
                 n_fovs = f.sizes['v']
                 cell_images_checked=True
@@ -269,7 +281,7 @@ class Pipeline:
             image = imread(os.path.join(self.data_path, self.lanes_file))
             return image[fov]
 
-    def param_dict(self):
+    def get_param_dict(self):
         """
         Function to get the parameters as a dictionary
 
@@ -290,7 +302,9 @@ class Pipeline:
         """
         # Code for saving parameters to disk
         with open(os.path.join(self.path_out, 'pipeline_arguments.json'), 'w') as f:
-            json.dump(self.param_dict(), f)
+            json.dump(self.get_param_dict(), f)
+      
+        return
 
     def Viewer(self):
         from .viewer.notebook_viewer import Viewer
@@ -344,6 +358,7 @@ class Pipeline:
         if self.nd2_cell_files:
             f = ND2Reader(os.path.join(self.data_path, self.image_file))
             frame_indices = list(range(f.sizes['t']))
+
         elif self.single_tif_cell_file:
             image = imread(os.path.join(self.data_path, self.image_file))
             frame_indices = list(range(image.shape[1]))
@@ -352,118 +367,190 @@ class Pipeline:
             frame_indices = list(range(image.shape[0]))
         
         return frame_indices
-
-    def segment(self):
+    
+    def infer_fovs(self):
         """
-        Function to segment the cells in the image file
-        """
-        # Code for cell segmentation
+        Function to infer the fovs to be processed
 
-    def track(self):
+        Returns
+        -------
+        fovs : list of int
+            The fovs to be processed.
         """
-        Function to track the cells over time
+        if self.nd2_cell_files:
+            f = ND2Reader(os.path.join(self.data_path, self.image_file))
+            fovs = list(range(f.sizes['v']))
+        elif self.single_tif_cell_file:
+            image = imread(os.path.join(self.data_path, self.image_file))
+            fovs = list(range(image.shape[0]))
+        elif self.multiple_tif_cell_files:
+            fovs = list(range(len(self.bf_file)))
+        
+        return fovs
+    
+    def infer_fovs_lanes(self):
         """
+        Function to infer the fovs to be processed
 
-        # Code for cell tracking
+        Returns
+        -------
+        fovs : list of int
+            The fovs to be processed.
+        """
+        if self.nd2_lanes_file:
+            f = ND2Reader(os.path.join(self.data_path, self.lanes_file))
+            fovs = list(range(f.sizes['v']))
+        elif self.single_tif_lanes_file:
+            image = imread(os.path.join(self.data_path, self.lanes_file))
+            fovs = list(range(image.shape[0]))
+        
+        return fovs
 
-    def detect_lanes(self):
+    def detect_lanes(self, fovs, verbose=True):
         """
         Function to detect the lanes in the image file
         """
         # Code for lane detection
+        # Read the lanes image
+        fovs = [fovs] if isinstance(fovs, int) else fovs
+        bad_fovs = []
+        for fov in tqdm(fovs, desc='Detecting lanes', disable=not verbose):
+            
+            try:
+                lanes_dir = os.path.join(self.path_out, f'XY{fov}/lanes')
+                lanes_image = self.read_lanes()
+                
+                lanes_mask, lanes_metric = lane_detection.get_lane_mask(
+                    lanes_image, kernel_width=3, line_distance=self.lane_distance,
+                    threshold=self.lane_threshold, low_clip=self.lane_low_clip, high_clip=self.lane_high_clip)
 
-    def save_results(self):
-        """
-        Function to save the results to disk
-        """
-        # Code for saving results
 
-    def load_image(self):
-        """
-        Function to load the image file
-        """
-        # Code for loading image
+                imwrite(os.path.join(lanes_dir, 'lanes_mask.tif'), lanes_mask)
+                imwrite(os.path.join(lanes_dir, 'lanes_metric.tif'), lanes_metric)
+            except Exception as e:
+                logging.warning(f'Could not detect lanes for fov {fov} \n {e}')
+                bad_fovs.append(fov)
+        
+        if len(bad_fovs)>0:
+            print(f'WARNING! Could not detect lanes for fovs {bad_fovs}')
+                
 
-    def load_lanes(self):
-        """
-        Function to load the lanes file
-        """
-        # Code for loading lanes
+        return lanes_mask, lanes_metric
 
-    def get_frame_indices(self):
+    def segment(self, fov):
         """
-        Function to get the frame indices to be processed
+        Function to segment the cells in the image file
         """
-        # Code for getting frame indices
+        # Code for cell segmentation
+        self.segmentation = Segmentation(pretrained_model=self.pretrained_model, gpu=self.use_gpu, omni=self.omni)
 
-    def get_fovs(self):
-        """
-        Function to get the field of views to be processed
-        """
-        # Code for getting field of views
+        bf = self.read_bf(frames=self.frame_indices, fov=fov)
+        nuc = self.read_nuc(frames=self.frame_indices, fov=fov)
+        masks = self.segmentation.segment(brightfield=bf, nucleus=nuc, diameter=self.cyto_diameter, flow_threshold=self.flow_threshold, cellprob_threshold=self.cellprob_threshold, verbose=self.verbose)
 
-    def save_to_sql(self):
-        """
-        Function to save the intermediate results to a SQL database
-        """
-        # Code for saving to SQL database
+        ## Now save the segmentation results
+        self.save_segmentation_results(masks, fov=fov)
 
-    def get_image_shape(self):
-        """
-        Function to get the shape of the image file
-        """
-        # Code for getting image shape
+        return
+    
+    def save_segmentation_results(self, masks, fov=0):
+        
+        if self.savenumpy_masks:    
+            outpath = os.path.join(self.path_out, f'XY{fov}/cyto_masks.npz')
+            np.savez(outpath, masks)
+        else:
+            outpath = os.path.join(self.path_out, f'XY{fov}/cyto_masks.mp4')
+            functions.np_to_mp4(masks, outpath)
+            
 
-    def get_lanes_shape(self):
+    def track(self, fov):
         """
-        Function to get the shape of the lanes file
+        Function to track the cells over time
         """
-        # Code for getting lanes shape
-
-    def get_image(self, frame_index, fov):
+        nuclei = self.read_nuc(frames=self.frame_indices, fov=fov)
+        df = tracking.track_nuclei(nuclei, diameter=self.diameter, minmass=self.min_mass, track_memory=self.track_memory, max_travel=self.max_travel, min_frames=self.min_frames, verbose=False, logger=self.logger)
+        # Save the df
+        dfpath = os.path.join(self.path_out, f'XY{fov}/tracking_data.csv')
+        df.to_csv(dfpath)
+        
+        return
+    
+    def merge_tracking_data(self, fov, verbose=True):
         """
-        Function to get a single image from the image file
-
-        Parameters
-        ----------
-        frame_index : int
-            Index of the frame to be extracted.
-        fov : int
-            Index of the field of view to be extracted.
-
-        Returns
-        -------
-        image : ndarray
-            The extracted image.
+        Function to merge the tracking data of all fovs
         """
-        # Code for getting a single image
+        # Get the tracking data, cyto masks and lanes masks for each fov
+        try:
+            df = pd.read_csv(os.path.join(self.path_out, f'XY{fov}/tracking_data.csv'))
+        except FileNotFoundError:
+            print(f'WARNING! Could not find tracking data for fov {fov}')
+            self.logger.warning(f'Could not find tracking data for fov {fov}')
+            if len(df)==0:
+                print(f'WARNING! Tracking data for fov {fov} is empty, skipping this fov')
+                self.logger.warning(f'Tracking data for fov {fov} is empty, skipping this fov')
+                return  
+        try:
+            try:
+                cyto_masks = np.load(os.path.join(self.path_out, f'XY{fov}/cyto_masks.npz'))['arr_0']
+            except:
+                cyto_masks = functions.mp4_to_np(os.path.join(self.path_out, f'XY{fov}/cyto_masks.mp4'))
+        except FileNotFoundError:
+           
+            print(f'WARNING! Could not find masks for fov {fov}')
+            self.logger.warning(f'Could not find tracking data for fov {fov}')
+            return    
+        try:
+            lanes_image = self.read_lanes(fov=fov)
+            lanes_mask = imread(os.path.join(self.path_out, f'XY{fov}/lanes/lanes_mask.tif'))
+            lanes_metric = imread(os.path.join(self.path_out, f'XY{fov}/lanes/lanes_metric.tif'))
+        except FileNotFoundError:
+            print(f'WARNING! Could not find lanes mask for fov {fov}')
+            self.logger.warning(f'Could not find tracking data for fov {fov}')
+            return
 
-    def get_lanes(self, fov):
+        
+        df = tracking.merge_tracking_data(df, cyto_masks, lanes_mask, lanes_metric, patterns=lanes_image, tres=self.tres, min_duration=self.min_duration, verbose=verbose, logger=self.logger)
+        #now save the file
+        dfpath = os.path.join(self.path_out, f'XY{fov}/tracking_data.csv')
+        df.to_csv(dfpath)
+        return
+
+    def filter_tracking_data(self, fov):
         """
-        Function to get the lanes for a single field of view
-
-        Parameters
-        ----------
-        fov : int
-            Index of the field of view to be extracted.
-
-        Returns
-        -------
-        lanes : ndarray
-            The extracted lanes.
+        Function to filter the tracking data
         """
-        # Code for getting lanes for a single field of view
+        # Code for filtering tracking data
+        # Read the tracking data
+        df = pd.read_csv(os.path.join(self.path_out, f'XY{fov}/tracking_data.csv'))
+        # Filter the tracking data
+        df = tracking.get_clean_tracks(df, max_interpolation=5, min_length=self.min_track_length, image_height=self.height)
+        
+        dfpath = os.path.join(self.path_out, f'XY{fov}/clean_tracking_data.csv')
 
-    def get_cellpose_model(self):
-        """
-        Function to get the Cellpose model
+        df.to_csv(dfpath)
 
-        Returns
-        -------
-        model : tuple
-            The Cellpose model.
+        return
+
+    def classify_tracks(self, fov):
         """
-        # Code for getting the Cellpose model
+        Function to classify the tracks
+        """
+        # Code for classifying tracks
+        # Read the tracking data
+        df = pd.read_csv(os.path.join(self.path_out, f'XY{fov}/clean_tracking_data.csv'))
+        # Classify the tracks
+        # coarsen to 5 minutes
+        coarsen = int(5*60/self.tres)
+        # smooth to an hour
+        sm = int(60*60/(self.tres*coarsen))
+        #set minimum length
+        min_length= int(2*sm)+1
+        df = tracking.classify_tracks(df, tres=self.tres, coarsen=coarsen, sm=sm, pixelperum=self.pixelperum, min_velocity=self.min_velocity, min_o=self.min_o, min_length=min_length)
+        # Save the df
+        dfpath = os.path.join(self.path_out, f'XY{fov}/clean_tracking_data.csv')
+        df.to_csv(dfpath)
+
+        return
 
     def get_existing_parameters(self):
         """
@@ -476,340 +563,141 @@ class Pipeline:
         """
         # Code for getting existing parameters from disk
 
-    def save_parameters(self):
+    def init_logger(self):
         """
-        Function to save the parameters to disk
-
-        Parameters
-        ----------
-        parameters : dict
-            The parameters to be saved.
+        Function to initialise the logger
         """
-        # Code for saving parameters to disk
-        with open(os.path.join(self.path_out, 'parameters.json'), 'w') as f:
-            json.dump(self.param_dict(), f)
+        current_datetime = datetime.datetime.now()
+        formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+        
+        log_filename = f"pipelinelog_{formatted_datetime}.log"
+        log_file_path = os.path.join(self.path_out, log_filename)
 
-    def run_pipeline(self):
+        # Create a logger instance
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.INFO)
+
+        # Create a formatter
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+        # Create a file handler and set the formatter
+        file_handler = logging.FileHandler(log_file_path)
+        file_handler.setFormatter(formatter)
+
+        # Add the file handler to the logger
+        logger.addHandler(file_handler)
+
+        logger.info('Started pipeline')
+        print('Started pipeline')
+        print('Logging to {}'.format(log_file_path))
+        self.logger=logger
+        return
+    
+    def creat_directories_for_output(self):
         """
-        Function to run the pipeline on a full experiment containing many fields of view
+        Function to create the directories for the output
         """
-        # Check if the files are present in the data_path and if they are of the right type
-        self.check_files()
+        # Code for creating directories for output
+        for fov in self.fovs:
+            if not os.path.isdir(os.path.join(self.path_out, f'XY{fov}')):
+                os.mkdir(os.path.join(self.path_out, f'XY{fov}'))
+            if not os.path.isdir(os.path.join(self.path_out, f'XY{fov}/lanes')):    
+                os.mkdir(os.path.join(self.path_out, f'XY{fov}/lanes'))
+        return
 
-        # Run the pipeline
-        self.segment()
-        self.track()
-        self.detect_lanes()
-        self.save_results()
-
-
-
-
-def read_image(file_name, fov, frames=None, channel=None):
-    """
-    Function to read an image file
-
-    Parameters
-    ----------
-    file_name : str
-        Name of the image file.
-    fov : int
-        Index of the field of view to be extracted.
-    frames : slice or list of int, optional
-        Frames to be extracted. If None, all frames are extracted.
-    channel : int, optional
-        Channel to be extracted. If None, all channels are extracted.
-
-    Returns
-    -------
-    image : ndarray
-        The extracted image.
-    """
-    if file_name.endswith('.nd2'):
-        with ND2Reader(file_name) as images:
-            images.bundle_axes = 'cyx'
-            images.iter_axes = 't'
-            if frames is None:
-                frames = slice(None)
-            if channel is None:
-                channel = slice(None)
-            return images[frames, channel, fov]
-
-    if file_name.endswith('.mp4'):
-
-        return functions.mp4_to_np(os.path.join(data_path, file_name), frames=frames)
-
-    if file_name.endswith('.tif') or file_name.endswith('.tiff'):
-        # if the file_name is a list
-        if isinstance(file_name, list):
-            return imread(os.path.join(data_path, file_name[fov]), key=frames)
-        else:
-            return imread(os.path.join(data_path, file_name), key=frames)
-
-
-def detect_lanes(file_name, fovs, lane_distance=30, low_clip=300, high_clip=2000, v_rel=0.5):
-
-    for fov in fovs:
-        lanes_image = read_image(file_name, fov, channel=0)
-        lanes_image = np.clip(lanes_image, low_clip, high_clip)
-
-        lanes_mask, lanes_metric = lane_detection.get_lane_mask(
-            lanes_image, kernel_width=5, line_distance=lane_distance,
-            threshold=v_rel)
-        n_lanes = lanes_mask.max()
-
-        try:
-            lanes_dir = os.path.join(self.path_out, 'lanes')
-            os.mkdir(lanes_dir)
-        except FileExistsError:
-            pass
-
-        imwrite(os.path.join(lanes_dir, 'lanes_mask.tif'), self.lanes_mask)
-        imwrite(os.path.join(lanes_dir, 'lanes_metric.tif'), self.lanes_metric)
+    def convert_pixels_to_um(self, fov):
+        """
+        Convert clean tracking data and convert the nucleus, rear v_nuc, v_rear, v_front, length, area, x, y into um.
+        """
+        pathtodf = os.path.join(self.path_out, f'XY{fov}/clean_tracking_data.csv')
+        df = pd.read_csv(pathtodf)
+        df.nucleus = df.nucleus/self.pixelperum
+        df.rear = df.rear/self.pixelperum
+        df.front = df.front/self.pixelperum
+        df.v_nuc = df.v_nuc*self.pixelperum/self.tres
+        df.v_rear = df.v_rear*self.pixelperum/self.tres
+        df.v_front = df.v_front*self.pixelperum/self.tres
+        df.length = df.length*self.pixelperum
+        df.area = df.area*self.pixelperum**2
+        df.x = df.x*self.pixelperum
+        df.y = df.y*self.pixelperum
+        df.to_csv(pathtodf)
+        return
+    
+    def check_for_mergin_data(self, fov):
+        """
+        Function to check if the data to merge is present already
+        """
+        assert os.path.isfile(os.path.join(self.path_out, f'XY{fov}/cyto_masks.npz')) or os.path.isfile(os.path.join(self.path_out, f'XY{fov}/cyto_masks.mp4')), f'Could not find cyto masks for fov {fov}'
+        assert os.path.isfile(os.path.join(self.path_out, f'XY{fov}/lanes/lanes_mask.tif')), f'Could not find lanes mask for fov {fov}'
+        assert os.path.isfile(os.path.join(self.path_out, f'XY{fov}/lanes/lanes_metric.tif')), f'Could not find lanes metric for fov {fov}'
+        assert os.path.isfile(os.path.join(self.path_out, f'XY{fov}/tracking_data.csv')), f'Could not find tracking data for fov {fov}'
 
         return
 
-def save_to_sql(df, table_name, conn):
-    """
-    Function to save a DataFrame to a SQL database
+    def run_pipeline(self, run_segmentation=True, run_tracking=True, run_lane_detection=True, merge_trajectories=True, classify_trajectories=False, verbose=True, convert_to_um=True):
+        """
+        Function to run the pipeline on a full experiment containing many fields of view
+        """
+        ## Initialise the logger
+        self.init_logger()
+        
+        # Check if the files are present in the data_path and if they are of the right type
+        self.check_files(self.data_path, image_file=self.image_file, lanes_file=self.lanes_file, path_out=self.path_out)
 
-    Parameters
-    ----------
-    df : pandas DataFrame
-        The DataFrame to be saved.
-    table_name : str
-        Name of the table to be created.
-    conn : sqlite3.Connection
-        Connection to the SQL database.
-    """
-    df.to_sql(table_name, conn, if_exists='replace', index=False)
+        # Create the directories for the output
+        self.creat_directories_for_output()
 
-def load_from_sql(table_name, conn):
-    """
-    Function to load a DataFrame from a SQL database
+        ## Now detect all the lanes
+        if run_lane_detection:
+            self.detect_lanes(self.fovs)
+        
+        ## Now run the rest of the pipeline by subsequent fovs
+        for fov in self.fovs:
+            print('Processing fov {}'.format(fov))
+            if run_segmentation:
+                print('Segmenting cells...')
+                self.segment(fov=fov)
+            if run_tracking:
+                print('Tracking cells with trackpy...')
+                self.track(fov=fov)
+            
+            ## Now get the full dataframe by merging the tracking data and the masks and lanes
+            if merge_trajectories:
+                # make sure the masks and lanes and tracking_data is present
+                self.check_for_mergin_data(fov=fov)
 
-    Parameters
-    ----------
-    table_name : str
-        Name of the table to be loaded.
-    conn : sqlite3.Connection
-        Connection to the SQL database.
+                print('Merging tracking data...')
+                self.logger.info('Merging tracking data...')
+                self.merge_tracking_data(fov=fov, verbose=verbose)
+                
+            ## Now some filtering and postprocessing
+            print('Filtering and postprocessing...')
+            self.logger.info('Filtering and postprocessing...')
+            self.filter_tracking_data(fov=fov)
+            
+            ## Now classify the tracks
+            if classify_trajectories:
+                ##This is still buggy though
+                try:
+                    print('Classifying tracks...')
+                    self.logger.info('Classifying tracks...')
+                    self.classify_tracks(fov=fov)
+                except Exception as e:
+                    print(f'WARNING! Could not classify tracks for fov {fov} ')
+                    self.logger.warning(f'Could not classify tracks for fov {fov} \n {e}')
 
-    Returns
-    -------
-    df : pandas DataFrame
-        The loaded DataFrame.
-    """
-    df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
-    return df
+            ## Now convert to um
+            if convert_to_um:
+                print('Converting to um...')
+                self.logger.info('Converting to um...')
+                self.convert_pixels_to_um(fov=fov)
 
-def get_image_shape(file_name):
-    """
-    Function to get the shape of an image file
+            print(f'Done with fov {fov}!')
+            self.logger.info(f'Done! with fov {fov}!')
+            
+        return
 
-    Parameters
-    ----------
-    file_name : str
-        Name of the image file.
 
-    Returns
-    -------
-    shape : tuple
-        The shape of the image file.
-    """
-    if file_name.endswith('.nd2'):
-        with ND2Reader(file_name) as images:
-            images.bundle_axes = 'cyx'
-            return images.sizes['y'], images.sizes['x'], images.sizes['t'], images.sizes['c']
 
-    if file_name.endswith('.mp4'):
-        video = io.vreader(file_name)
-        frame = next(video)
-        return frame.shape
 
-    if file_name.endswith('.tif') or file_name.endswith('.tiff'):
-        with TiffFile(file_name) as tif:
-            return tif.pages[0].shape
-
-def get_lanes_shape(file_name):
-    """
-    Function to get the shape of a lanes file
-
-    Parameters
-    ----------
-    file_name : str
-        Name of the lanes file.
-
-    Returns
-    -------
-    shape : tuple
-        The shape of the lanes file.
-    """
-    if file_name.endswith('.tif') or file_name.endswith('.tiff'):
-        with TiffFile(file_name) as tif:
-            return tif.pages[0].shape
-
-def get_image(file_name, frame_index, fov):
-    """
-    Function to get a single image from an image file
-
-    Parameters
-    ----------
-    file_name : str
-        Name of the image file.
-    frame_index : int
-        Index of the frame to be extracted.
-    fov : int
-        Index of the field of view to be extracted.
-
-    Returns
-    -------
-    image : ndarray
-        The extracted image.
-    """
-    if file_name.endswith('.nd2'):
-        with ND2Reader(file_name) as images:
-            images.bundle_axes = 'cyx'
-            images.iter_axes = 't'
-            return images[frame_index, :, :, fov]
-
-    if file_name.endswith('.mp4'):
-        video = io.vreader(file_name)
-        for i, frame in enumerate(video):
-            if i == frame_index:
-                return frame
-
-    if file_name.endswith('.tif') or file_name.endswith('.tiff'):
-        with TiffFile(file_name) as tif:
-            return tif.pages[frame_index].asarray()[fov]
-
-def get_lanes(file_name, fov):
-    """
-    Function to get the lanes for a single field of view
-
-    Parameters
-    ----------
-    file_name : str
-        Name of the lanes file.
-    fov : int
-        Index of the field of view to be extracted.
-
-    Returns
-    -------
-    lanes : ndarray
-        The extracted lanes.
-    """
-    if file_name.endswith('.tif') or file_name.endswith('.tiff'):
-        with TiffFile(file_name) as tif:
-            return tif.pages[fov].asarray()
-
-def get_cellpose_model(pretrained_model='bf'):
-    """
-    Function to get the Cellpose model
-
-    Parameters
-    ----------
-    pretrained_model : str, optional
-        Name of the pretrained model to be used. Default is 'bf'.
-
-    Returns
-    -------
-    model : tuple
-        The Cellpose model.
-    """
-    if pretrained_model == 'bf':
-        model = models.Cellpose(gpu=False, model_type='bf')
-    elif pretrained_model == 'nuclei':
-        model = models.Cellpose(gpu=False, model_type='nuclei')
-    else:
-        raise ValueError(f"Invalid pretrained model: {pretrained_model}")
-    return model
-
-def get_existing_parameters(path_out):
-    """
-    Function to get the existing parameters from disk
-
-    Parameters
-    ----------
-    path_out : str
-        Path to the output directory.
-
-    Returns
-    -------
-    parameters : dict
-        The existing parameters.
-    """
-    with open(os.path.join(path_out, 'parameters.json'), 'r') as f:
-        parameters = json.load(f)
-    return parameters
-
-def save_parameters(parameters, path_out):
-    """
-    Function to save the parameters to disk
-
-    Parameters
-    ----------
-    parameters : dict
-        The parameters to be saved.
-    path_out : str
-        Path to the output directory.
-    """
-    with open(os.path.join(path_out, 'parameters.json'), 'w') as f:
-        json.dump(parameters, f)
-
-def get_frame_indices(image_file, min_frames=10):
-    """
-    Function to get the frame indices to be processed
-
-    Parameters
-    ----------
-    image_file : str
-        Name of the image file.
-    min_frames : int, optional
-        Minimum number of frames to be processed. Default is 10.
-
-    Returns
-    -------
-    frame_indices : list of int
-        The frame indices to be processed.
-    """
-    if image_file.endswith('.nd2'):
-        with ND2Reader(image_file) as images:
-            n_frames = images.sizes['t']
-    elif image_file.endswith('.mp4'):
-        video = io.vreader(image_file)
-        n_frames = len(list(video))
-    elif image_file.endswith('.tif') or image_file.endswith('.tiff'):
-        with TiffFile(image_file) as tif:
-            n_frames = len(tif.pages)
-    else:
-        raise ValueError(f"Invalid image file: {image_file}")
-
-    if n_frames < min_frames:
-        raise ValueError(f"Number of frames ({n_frames}) is less than minimum ({min_frames})")
-
-    frame_indices = list(range(0, n_frames, 1))
-
-    return frame_indices
-
-def get_fovs(lanes_file):
-    """
-    Function to get the field of views to be processed
-
-    Parameters
-    ----------
-    lanes_file : str
-        Name of the lanes file.
-
-    Returns
-    -------
-    fovs : list of int
-        The field of views to be processed.
-    """
-    if lanes_file.endswith('.tif') or lanes_file.endswith('.tiff'):
-        with TiffFile(lanes_file) as tif:
-            n_fovs = tif.pages.shape[0]
-    else:
-        raise ValueError(f"Invalid lanes file: {lanes_file}")
-    
-    

@@ -7,7 +7,7 @@ import json
 from urllib import request
 #from cellpose.io import logger_setup 
 from tqdm import tqdm
-#logger_setup()
+
 
 class Segmentation:
     """
@@ -42,6 +42,7 @@ class Segmentation:
             return
 
         elif pretrained_model is None:
+            from cellpose import models
             self.model = models.Cellpose(gpu=gpu, model_type=model_type)
 
         else:

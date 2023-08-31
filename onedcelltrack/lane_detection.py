@@ -109,7 +109,7 @@ def np_hough(image, kernel_width, scaling=0.25):
     return hough, delta_y_array, y_0_list[0]
 
 
-def get_lane_mask(image, kernel_width=5, line_distance=30, threshold=0.5, scaling=0.25, debug=False, gpu=True):
+def get_lane_mask(image, kernel_width=5, line_distance=30, threshold=0.5, scaling=0.25, low_clip=0, high_clip=500, debug=False, gpu=True):
     """Function that takes in an image of a lines pattern, and returns a mask of the detected lanes. The algorithm assumes that the experimentator has tried to get the lanes to run as close to horizontal as possible.
 
     Args:
@@ -125,6 +125,9 @@ def get_lane_mask(image, kernel_width=5, line_distance=30, threshold=0.5, scalin
     
     #print('Detecting lanes...')
     h, w = image.shape
+    image = image.astype('float32')
+    image = np.clip(image, low_clip, high_clip)
+    image = (image-low_clip)/(high_clip-low_clip)
     
     if not gpu:
         hough, delta_y_array, y_0_array = np_hough(image, kernel_width, scaling)

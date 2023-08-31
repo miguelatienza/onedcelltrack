@@ -743,223 +743,26 @@ class CellposeViewer(Viewer):
         self.cellprob_threshold = self.cellprob_threshold_slider.value
         super().save(a)
         
-# class CellposeViewer:
-    
-#     def __init__(self, nd2file, bf_channel=None, nuc_channel=None,pretrained_model='mdamb231', omni=False):
-        
-#         self.link_dfs = {}
-        
-#         self.f = ND2Reader(nd2file)
-#         self.nfov, self.nframes = self.f.sizes['v'], self.f.sizes['t']
-        
-#         channels = self.f.metadata['channels']
-    
-#         if bf_channel is None or nuc_channel is None:
-#                     ###Infer the channels
-#             if 'erry' in channels[0] or 'exas' in channels[0] and not 'phc' in channels[0]:
-#                 self.nucleus_channel=0
-#                 self.cyto_channel=1
-#             elif 'erry' in channels[1] or 'exas' in channels[1] and not 'phc' in channels[1]:
-#                 self.nucleus_channel=1
-#                 self.cyto_channel=0
-                
-#             else:
-#                 raise ValueError(f"""The channels could not be automatically detected! \n
-#                 The following channels are available: {channels} . Please specify the indices of bf_channel and nuc_channel as keyword arguments. i.e: bf_channel=0, nuc_channel=1""")
-#         else:
-#             self.cyto_channel=bf_channel
-#             self.nucleus_channel=nuc_channel
 
-#         #Widgets
-        
-#         t_max = self.f.sizes['t']-1
-#         self.t = widgets.IntSlider(min=0,max=t_max, step=1, description="t", continuous_update=False)
-
-#         v_max = self.f.sizes['v']-1
-#         self.v = widgets.IntSlider(min=0,max=v_max, step=1, description="v", continuous_update=False)
-        
-#         self.nclip = widgets.FloatRangeSlider(min=0,max=2**16, step=1, value=[0,1000], description="clip nuclei", continuous_update=False, width='200px')
-        
-#         self.cclip = widgets.FloatRangeSlider(min=0,max=2**16, step=1, value=[50,8000], description="clip cyto", continuous_update=False, width='200px')
-        
-#         self.flow_threshold = widgets.FloatSlider(min=0, max=1.5, step=0.05, description="flow_threshold", value=1.25, continuous_update=False)
-        
-#         self.diameter = widgets.IntSlider(min=0,max=1000, step=2, description="diameter", value=29, continuous_update=False)
-        
-#         self.mask_threshold = widgets.FloatSlider(min=-3,max=3, step=0.1, value=0, description="mask_threshold", continuous_update=False)
-        
-#         self.max_travel = widgets.IntSlider(min=3,max=50, step=1, value=5, description="max_travel", continuous_update=False)
-        
-#         self.track_memory = widgets.IntSlider(min=0,max=20, step=1, value=5, description="max_travel", continuous_update=False)
-
-#         self.tp_method = widgets.Button(
-#         description='Track',
-#         disabled=False,
-#         button_style='', # 'success', 'info', 'warning', 'danger' or ''
-#         tooltip='Click me',
-#         icon='')
-        
-        
-#         vmin, vmax = self.cclip.value
-#         cyto = (255*(np.clip(self.f.get_frame_2D(v=0,c=self.cyto_channel,t=0), vmin, vmax)/vmax)).astype('uint8')
-#         #cyto = np.clip(self.f.get_frame_2D(v=0,c=self.cyto_channel,t=0), vmin, vmax)
-#         #nucleus = self.f.get_frame_2D(v=0,c=self.nucleus_channel,t=0)
-#         #nucleus = functions.preprocess(nucleus, log=True, bottom_percentile=0.05, top_percentile=99.95, return_type='uint8')
-#         vmin, vmax = self.nclip.value
-#         nucleus = (255*(np.clip(self.f.get_frame_2D(v=0,c=self.nucleus_channel,t=0), vmin, vmax)/vmax)).astype('uint8')
-#         red = np.zeros_like(nucleus)
-       
-#         image = np.stack((red, red, nucleus), axis=-1).astype('float32')
-#         image+=(cyto[:,:,np.newaxis]/3)
-#         image = np.clip(image, 0,255).astype('uint8')
-        
-#         ##Initialize the figure
-#         plt.ioff()
-#         self.fig, self.ax = plt.subplots()
-#         self.fig.tight_layout()
-#         #self.fig.canvas.toolbar_visible = False
-#         self.fig.canvas.header_visible = False
-#         #self.fig.canvas.footer_visible = False
-#         self.im = self.ax.imshow(image)
-
-#         self.init_cellpose(pretrained_model=pretrained_model, omni=omni)
-                
-#         #Organize layout and display
-#         out = widgets.interactive_output(self.update, {'t': self.t, 'v': self.v, 'cclip': self.cclip, 'nclip': self.nclip, 'flow_threshold': self.flow_threshold, 'diameter': self.diameter, 'mask_threshold': self.mask_threshold, 'max_travel': self.max_travel})
-        
-#         box = widgets.VBox([self.t, self.v, self.cclip, self.nclip, self.flow_threshold, self.diameter, self.mask_threshold, self.tp_method]) #, layout=widgets.Layout(width='400px'))
-#         box1 = widgets.VBox([out, box])
-#         grid = widgets.widgets.GridspecLayout(3, 3)
-        
-#         grid[:, :2] = self.fig.canvas
-#         grid[1:,2] = box
-#         grid[0, 2] = out
-        
-#         #display(self.fig.canvas)
-#         display(grid)
-#         plt.ion()
-    
-#     def init_cellpose(self, pretrained_model='mdamb231', omni=False, model='cyto', gpu=True):
- 
-#         if omni:
-#             from cellpose_omni.models import CellposeModel
-#             self.model = CellposeModel(
-#             gpu=gpu, omni=True, nclasses=4, nchan=2, pretrained_model=pretrained_model)
-#             return
-
-        
-#         elif pretrained_model is None:
-#             self.model = models.Cellpose(gpu=gpu, model_type='cyto')
-
-#         else:
-#             path_to_models = os.path.join(os.path.dirname(__file__), '../models')
-#             with open(os.path.join(path_to_models, 'models.json'), 'r') as f:
-#                 dic = json.load(f)
-#             if pretrained_model in dic.keys():
-#                 path_to_model = os.path.join(path_to_models, dic[pretrained_model]['path'])
-#                 if os.path.isfile(path_to_model):
-#                     pretrained_model = path_to_model
-#                 else: 
-         
-#                     url = dic[pretrained_model]['link']
-#                     print('Downloading model from Nextcloud...')
-#                     request.urlretrieve(url, os.path.join(path_to_models, path_to_model))
-#                     pretrained_model = os.path.join(path_to_models,dic[pretrained_model]['path'])
-
-            
-#             if not omni:
-#                 self.model = models.CellposeModel(gpu=gpu, pretrained_model=pretrained_model)
-
-#     def update(self, t, v, cclip, nclip, flow_threshold, diameter, mask_threshold, max_travel):      
-        
-        
-#         #contours = get_outlines(image)
-#         self.segment(
-#         t, v, cclip, nclip, flow_threshold, mask_threshold, diameter)
-#         self.im.set_data(self.image)
-#         return
-#         #lanes = g.get_frame_2D(v=v)
-#         #self.im.set_clim([vmin, vmax])
-#         #self.fig.canvas.draw()
-        
-
-#         self.batch_update(v, t, min_mass, diameter)
-#         self.show_tracking(self.batch_df, self.bscat)
-#         try:
-#             df = self.link_dfs[v][self.link_df.frame==t]
-#             self.show_tracking(df, self.lscat)
-#         except:
-#             self.lscat.set_offsets([]) 
-    
-#     def show_tracking(self, df, scat):
-        
-#         t, v= self.t.value, self.v.value
-        
-#         #[plt.axes.lines[0].remove() for j in range(len(self.ax.axes.lines))]
-#         data = np.hstack((df.x.values[:,np.newaxis], df.y.values[:, np.newaxis]))
-#         scat.set_offsets(data)
-    
-#     def segment(self,t, v, cclip, nclip, flow_threshold, mask_threshold, diameter, normalize=True, verbose=False,):
-        
-#         #nucleus = self.f.get_frame_2D(v=v, t=t, c=self.nucleus_channel)
-#         #vmin, vmax = nclip
-#         #nucleus = functions.preprocess(nucleus, bottom_percentile=vmin, top_percentile=vmax, log=True, return_type='uint16')
-#         #vmin, vmax = cclip
-#         #cyto = self.f.get_frame_2D(v=v, t=t, c=self.cyto_channel)
-#         #cyto = functions.preprocess(cyto, bottom_percentile=vmin, top_percentile=vmax, return_type='uint16')
-       
-#         nucleus = self.f.get_frame_2D(v=v, t=t, c=self.nucleus_channel)
-#         #nucleus = functions.preprocess(nucleus, bottom_percentile=0, #top_percentile=100, log=True, return_type='uint16')
-#         cyto = self.f.get_frame_2D(v=v, t=t, c=self.cyto_channel)
-        
-    
-#         image = np.stack((cyto, nucleus), axis=-1)
-#         print(image.shape)
-#         print('hjflks1')
-#         if diameter == 0:
-#             diameter=None
-#         mask = self.model.eval(
-#             image, diameter=diameter, channels=[1, 0], flow_threshold=flow_threshold, cellprob_threshold=mask_threshold, normalize=normalize, progress=verbose)[0].astype('uint8')
-        
-#         bin_mask = np.zeros(mask.shape, dtype='bool')
-#         cell_ids = np.unique(mask)
-#         cell_ids = cell_ids[cell_ids!=0]
-        
-#         for cell_id in cell_ids:
-#             bin_mask+=binary_erosion(mask==cell_id)
-        
-#         outlines = find_boundaries(bin_mask, mode='outer')
-#         try:
-#             print(f'{cell_ids.max()} Masks detected')
-#         except ValueError:
-#             print('No masks detected')
-#         self.outlines = outlines
-        
-#         self.mask=mask
-#         self.image = self.get_8bit(outlines, cyto)
-        
-#         return 
-    
-#         self.image = np.stack((outlines, cyto.astype('uint8'), nucleus.astype('uint8')), axis=-1)
-#         self.outlines = outlines
-        
-#     def get_8bit(self, outlines, cyto, nuclei=None):
-               
-#         vmin, vmax = self.cclip.value
-#         cyto = np.clip(cyto, vmin, vmax)
-#         cyto = (255*(cyto-vmin)/(vmax-vmin)).astype('uint8')
-        
-#         image = np.stack((cyto, cyto, cyto), axis=-1)
-        
-#         image[(outlines>0)]=[255,0,0]
-        
-#         #outlines[:,:,np.newaxis]>0
-        
-#         return image
-        
 
 class ResultsViewer:
-    
+    """
+    This class is used to view the results of the tracking and segmentation.
+    Parameters
+    ----------
+    nd2file : str
+        Path to the nd2file.
+    outpath : str
+        Path to the output directory.
+    base_path : str
+        Path to the base directory.
+    experiment_paths : list
+        List of paths to the experiments.
+    db_path : str
+        Path to the database.
+    path_to_patterns : str
+        Path to the patterns file.
+    """
     def __init__(self, nd2file, outpath, base_path=None, experiment_paths=[], db_path = '/project/ag-moonraedler/MAtienza/database/onedcellmigration.db', path_to_patterns=None):
         
         self.link_dfs = {}

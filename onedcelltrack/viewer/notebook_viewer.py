@@ -173,6 +173,7 @@ class Viewer(Pipeline):
         self.clip = widgets.IntRangeSlider(min=0,max=int(2**16 -1), step=1, value=[0,50_000], description="clip", continuous_update=True, width='200px')
         #slider for the fovs and make them as wide as te image
         self.fov = widgets.IntSlider(min=min(self.fovs),max=max(self.fovs), step=1, description="fov", continuous_update=False)
+        #slider for the frames and make them as wide as te image
         self.frame = widgets.IntSlider(min=min(self.frame_indices),max=max(self.frame_indices), step=1, description="frame", continuous_update=False)
         
         ##Initialize the figure
@@ -211,7 +212,7 @@ class Viewer(Pipeline):
         # box for the sliders with same width as the image
         slider_box = widgets.VBox([self.fov, self.clip, self.frame])#,  layout=widgets.Layout(width=str(self.fig.get_size_inches()[0]*self.fig.dpi)))
         # box for the buttons
-        buttons = widgets.VBox([self.button_delete_fov, self.button_exchange_channels, self.button_save, self.select_channel, self.button_cut_left, self.button_cut_right, self.select_tres, self.lanes_alpha, self.position_status, self.select_pixelperum])
+        buttons = widgets.VBox([self.button_delete_fov, self.button_exchange_channels, self.button_save, self.select_channel, self.button_cut_left, self.button_cut_right, self.select_tres, self.lanes_alpha, self.position_status, self.select_pixelperum, self.position_status])
         
         # box for the sliders and figure
         right_box = widgets.VBox([self.fig.canvas, slider_box])
@@ -280,7 +281,6 @@ class Viewer(Pipeline):
         """
         Deletes the current fov from the fovs and fovs_lanes lists.
         """
-        print(self.fovs)
         if not self.fov.value in self.fovs:
             return
         self.fovs.remove(self.fov.value)
@@ -299,7 +299,7 @@ class Viewer(Pipeline):
         ## add a message
         self.button_save.description='Saving...'
         self.update_pipeline()
-        print('udpatin pipeline')
+        print('udpating pipeline')
 
         if self.tres is None:
             ## Make the save button turn red
@@ -398,7 +398,8 @@ class LaneViewer(Viewer):
         self.__dict__.update(pipeline.__dict__)
         ## Initialise the Viewer class
         super().__init__(pipeline)
-   
+        self.pipeline = pipeline
+
         ## Add new necessary sliders
         self.ld = widgets.IntSlider(min=10,max=60, step=1, description="lane distance", value=self.lane_distance, continuous_update=True)
         self.threshold = widgets.FloatSlider(min=0,max=1, step=0.05, description="threshold", continuous_update=False, value=self.lane_threshold)
@@ -415,8 +416,8 @@ class LaneViewer(Viewer):
         icon='') # (FontAwesome names without the `fa-` prefix)
         self.recompute_button.on_click(self.recompute)
         
-        self.min_coordinates = list(self.fovs.copy())
-        self.max_coordinates = list(self.fovs.copy())
+        self.min_coordinates = {fov: None for fov in self.fovs}
+        self.max_coordinates = {fov: None for fov in self.fovs}
 
         self.ax.plot([], [], color='red')
         
@@ -424,7 +425,7 @@ class LaneViewer(Viewer):
         """
         Returns the lanes for all fovs as a list.
         """
-        lanes = [self.read_lanes(fov=fov) for fov in self.fovs]
+        lanes = {fov: self.read_lanes(fov=fov) for fov in self.fovs}
         return lanes
     
     def update(self, fov, clip):
@@ -742,8 +743,6 @@ class CellposeViewer(Viewer):
         self.flow_threshold = self.flow_threshold_slider.value
         self.cellprob_threshold = self.cellprob_threshold_slider.value
         super().save(a)
-        
-
 
 class ResultsViewer:
     """
